@@ -70,11 +70,11 @@ This plan outlines the steps to implement the features described in `audiblez/fe
 
 **Phase 1: Staging and Queuing**
 
-*   **Phase 1.1: UI Tabs and Basic Structure**
+*   **Phase 1.1: UI Tabs and Basic Structure** [DONE]
     *   Modify the UI ([`audiblez/ui.py`](audiblez/ui.py)) to replace the single chapters panel with a tabbed interface containing "Chapters", "Staging", and "Queue" tabs.
     *   The "Chapters" tab will retain the current functionality.
     *   Implement the basic structure for the "Staging" and "Queue" tabs.
-*   **Phase 1.2: Staging Functionality**
+*   **Phase 1.2: Staging Functionality** [DONE]
     *   Add a "Stage Book" option (button or context menu) in the "Chapters" tab.
     *   Implement logic to move the currently loaded book and its chapters to the "Staging" tab when "Stage Book" is selected.
     *   Store the staged book and its chapters in the database, including book metadata.
