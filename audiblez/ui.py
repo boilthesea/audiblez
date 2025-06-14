@@ -554,11 +554,13 @@ class MainWindow(wx.Frame):
         self.document_chapters = find_document_chapters_and_extract_texts(book)
         # Determine selected chapter for display in text_area (used by create_layout_for_ebook)
         good_chapters_list = find_good_chapters(self.document_chapters)
-        self.selected_chapter = good_chapters_list[0] if good_chapters_list else (self.document_chapters[0] if self.document_chapters else None)
+        self.good_chapters_list = good_chapters_list # Store as instance variable
+        self.selected_chapter = self.good_chapters_list[0] if self.good_chapters_list else (self.document_chapters[0] if self.document_chapters else None)
 
         for chapter in self.document_chapters: # Set is_selected based on good_chapters for create_chapters_table_panel
             chapter.short_name = chapter.get_name().replace('.xhtml', '').replace('xhtml/', '').replace('.html', '').replace('Text/', '')
-            chapter.is_selected = chapter in good_chapters_list
+            # Use the instance variable here for consistency and correctness
+            chapter.is_selected = chapter in self.good_chapters_list
 
 
         # Create left panel and notebook structure
@@ -647,10 +649,15 @@ class MainWindow(wx.Frame):
         table.Bind(wx.EVT_LIST_ITEM_UNCHECKED, self.on_table_unchecked)
         table.Bind(wx.EVT_LIST_ITEM_SELECTED, self.on_table_selected)
 
-        for i, chapter in enumerate(self.document_chapters):
-            auto_selected = chapter in good_chapters
+        # self.good_chapters_list should be available here, set in open_epub
+        for i, chapter in enumerate(document_chapters_list): # Use the passed argument
+            auto_selected = chapter in self.good_chapters_list
             table.Append(['', chapter.short_name, f"{len(chapter.extracted_text):,}"])
-            if auto_selected: table.CheckItem(i)
+            if auto_selected:
+                table.CheckItem(i)
+            # Ensure chapter.is_selected is consistent if it wasn't set by open_epub's loop,
+            # though it should be. This is more about table checking.
+            # chapter.is_selected = auto_selected # This line is redundant if open_epub already set it.
 
         title_text = wx.StaticText(panel, label=f"Select chapters to include in the audiobook:")
         sizer.Add(title_text, 0, wx.ALL, 5)
