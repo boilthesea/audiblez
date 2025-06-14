@@ -55,7 +55,7 @@ This plan outlines the steps to implement the features described in `audiblez/fe
 
 **Phase 0: Foundation and Settings Persistence**
 
-*   **Phase 0.1: SQLite Database Setup**
+*   **Phase 0.1: SQLite Database Setup** [DONE]
     *   Create a new file, [`audiblez/database.py`](audiblez/database.py), to handle SQLite database operations.
     *   Implement functions to connect to `audiblez.db`.
     *   Create necessary tables for storing user settings, staged books/chapters, and the synthesis queue.
