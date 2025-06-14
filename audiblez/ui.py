@@ -227,9 +227,9 @@ class MainWindow(wx.Frame):
         self.center_sizer.Add(self.text_area, 1, wx.ALL | wx.EXPAND, 5)
 
         splitter_right_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        splitter_right.SetSizer(splitter_right_sizer)
+        self.splitter_right.SetSizer(splitter_right_sizer) # Use self.splitter_right
 
-        self.create_right_panel(splitter_right)
+        self.create_right_panel(self.splitter_right) # Use self.splitter_right
         splitter_right_sizer.Add(self.center_panel, 1, wx.ALL | wx.EXPAND, 5)
         splitter_right_sizer.Add(self.right_panel, 1, wx.ALL | wx.EXPAND, 5)
 
@@ -528,6 +528,8 @@ class MainWindow(wx.Frame):
 
         from ebooklib import epub
         from audiblez.core import find_document_chapters_and_extract_texts, find_good_chapters, find_cover
+
+        # Parse EPUB and extract metadata ONCE
         book = epub.read_epub(file_path)
         meta_title = book.get_metadata('DC', 'title')
         self.selected_book_title = meta_title[0][0] if meta_title else ''
@@ -535,33 +537,25 @@ class MainWindow(wx.Frame):
         self.selected_book_author = meta_creator[0][0] if meta_creator else ''
         self.selected_book = book
 
+        # Determine document chapters ONCE
         self.document_chapters = find_document_chapters_and_extract_texts(book)
-        good_chapters = find_good_chapters(self.document_chapters)
-        self.selected_chapter = good_chapters[0]
+
+        # Determine good chapters list ONCE and store as instance variable
+        self.good_chapters_list = find_good_chapters(self.document_chapters)
+
+        # Determine selected_chapter based on good_chapters_list or document_chapters
+        if self.good_chapters_list:
+            self.selected_chapter = self.good_chapters_list[0]
+        elif self.document_chapters: # Fallback if no good chapters but document chapters exist
+            self.selected_chapter = self.document_chapters[0]
+        else:
+            self.selected_chapter = None
+            # Consider: wx.LogWarning("No chapters found in the EPUB.") or similar feedback.
+
+        # Process all chapters for short_name and initial selection status ONCE
         for chapter in self.document_chapters:
             chapter.short_name = chapter.get_name().replace('.xhtml', '').replace('xhtml/', '').replace('.html', '').replace('Text/', '')
-            chapter.is_selected = chapter in good_chapters
-
-        from ebooklib import epub
-        from audiblez.core import find_document_chapters_and_extract_texts, find_good_chapters, find_cover
-        book = epub.read_epub(file_path)
-        meta_title = book.get_metadata('DC', 'title')
-        self.selected_book_title = meta_title[0][0] if meta_title else ''
-        meta_creator = book.get_metadata('DC', 'creator')
-        self.selected_book_author = meta_creator[0][0] if meta_creator else ''
-        self.selected_book = book
-
-        self.document_chapters = find_document_chapters_and_extract_texts(book)
-        # Determine selected chapter for display in text_area (used by create_layout_for_ebook)
-        good_chapters_list = find_good_chapters(self.document_chapters)
-        self.good_chapters_list = good_chapters_list # Store as instance variable
-        self.selected_chapter = self.good_chapters_list[0] if self.good_chapters_list else (self.document_chapters[0] if self.document_chapters else None)
-
-        for chapter in self.document_chapters: # Set is_selected based on good_chapters for create_chapters_table_panel
-            chapter.short_name = chapter.get_name().replace('.xhtml', '').replace('xhtml/', '').replace('.html', '').replace('Text/', '')
-            # Use the instance variable here for consistency and correctness
-            chapter.is_selected = chapter in self.good_chapters_list
-
+            chapter.is_selected = chapter in self.good_chapters_list # Use instance var for consistency
 
         # Create left panel and notebook structure
         self.splitter_left = wx.Panel(self.splitter, -1)
