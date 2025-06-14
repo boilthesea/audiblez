@@ -59,11 +59,11 @@ This plan outlines the steps to implement the features described in `audiblez/fe
     *   Create a new file, [`audiblez/database.py`](audiblez/database.py), to handle SQLite database operations.
     *   Implement functions to connect to `audiblez.db`.
     *   Create necessary tables for storing user settings, staged books/chapters, and the synthesis queue.
-*   **Phase 0.2: Remember User Settings**
+*   **Phase 0.2: Remember User Settings** [DONE]
     *   Modify the UI ([`audiblez/ui.py`](audiblez/ui.py)) to load the last used engine, voice, and speed settings from the database on startup.
     *   Modify the UI to save the current engine, voice, and speed settings to the database whenever they are changed.
     *   Update [`audiblez/cli.py`](audiblez/cli.py) to potentially load default settings from the database if not provided via command line arguments.
-*   **Phase 0.3: User Editable Rate**
+*   **Phase 0.3: User Editable Rate** [DONE]
     *   Add a new input field in the UI ([`audiblez/ui.py`](audiblez/ui.py)) for the user to enter a custom characters-per-second rate.
     *   Store this custom rate in the database.
     *   Modify the progress calculation in [`audiblez/core.py`](audiblez/core.py) to use the user-defined rate if available, falling back to the default if not set.

@@ -18,6 +18,7 @@ from tempfile import NamedTemporaryFile
 from pathlib import Path
 
 from audiblez.voices import voices, flags
+from audiblez.database import load_all_user_settings, save_user_setting
 
 EVENTS = {
     'CORE_STARTED': NewEvent(),
@@ -49,6 +50,19 @@ class MainWindow(wx.Frame):
 
         self.create_menu()
         self.create_layout()
+
+        # Load user settings
+        self.user_settings = load_all_user_settings()
+        if not self.user_settings: # Ensure it's a dict
+            self.user_settings = {}
+
+        # Initialize core attributes that will be set by UI controls,
+        # potentially using loaded settings or defaults.
+        # These will be properly set in create_params_panel and create_synthesis_panel
+        self.selected_voice = None
+        self.selected_speed = 1.0 # Default speed
+        self.custom_rate = None # Default custom rate
+
         self.Centre()
         self.Show(True)
         if Path('../epub/lewis.epub').exists(): self.open_epub('../epub/lewis.epub')
@@ -271,21 +285,41 @@ class MainWindow(wx.Frame):
 
         engine_label = wx.StaticText(panel, label="Engine:")
         engine_radio_panel = wx.Panel(panel)
-        cpu_radio = wx.RadioButton(engine_radio_panel, label="CPU", style=wx.RB_GROUP)
-        cuda_radio = wx.RadioButton(engine_radio_panel, label="CUDA")
-        if torch.cuda.is_available():
-            cuda_radio.SetValue(True)
-        else:
-            cpu_radio.SetValue(True)
-            # cuda_radio.Disable()
+        self.cpu_radio = wx.RadioButton(engine_radio_panel, label="CPU", style=wx.RB_GROUP)
+        self.cuda_radio = wx.RadioButton(engine_radio_panel, label="CUDA")
+
+        # Load saved engine or set default
+        saved_engine = self.user_settings.get('engine')
+        if saved_engine == 'cpu':
+            self.cpu_radio.SetValue(True)
+            torch.set_default_device('cpu')
+        elif saved_engine == 'cuda' and torch.cuda.is_available():
+            self.cuda_radio.SetValue(True)
+            torch.set_default_device('cuda')
+        elif torch.cuda.is_available(): # Default to CUDA if available and no setting
+            self.cuda_radio.SetValue(True)
+            torch.set_default_device('cuda')
+        else: # Default to CPU
+            self.cpu_radio.SetValue(True)
+            torch.set_default_device('cpu')
+
+        # if not torch.cuda.is_available():
+            # self.cuda_radio.Disable() # Optional: disable if no CUDA
+
         sizer.Add(engine_label, pos=(0, 0), flag=wx.ALL, border=border)
         sizer.Add(engine_radio_panel, pos=(0, 1), flag=wx.ALL, border=border)
         engine_radio_panel_sizer = wx.BoxSizer(wx.HORIZONTAL)
         engine_radio_panel.SetSizer(engine_radio_panel_sizer)
-        engine_radio_panel_sizer.Add(cpu_radio, 0, wx.ALL, 5)
-        engine_radio_panel_sizer.Add(cuda_radio, 0, wx.ALL, 5)
-        cpu_radio.Bind(wx.EVT_RADIOBUTTON, lambda event: torch.set_default_device('cpu'))
-        cuda_radio.Bind(wx.EVT_RADIOBUTTON, lambda event: torch.set_default_device('cuda'))
+        engine_radio_panel_sizer.Add(self.cpu_radio, 0, wx.ALL, 5)
+        engine_radio_panel_sizer.Add(self.cuda_radio, 0, wx.ALL, 5)
+
+        def on_select_engine(event, engine_type):
+            torch.set_default_device(engine_type)
+            save_user_setting('engine', engine_type)
+            print(f"Engine set to {engine_type} and saved.")
+
+        self.cpu_radio.Bind(wx.EVT_RADIOBUTTON, lambda event: on_select_engine(event, 'cpu'))
+        self.cuda_radio.Bind(wx.EVT_RADIOBUTTON, lambda event: on_select_engine(event, 'cuda'))
 
         # Create a list of voices with flags
         flag_and_voice_list = []
@@ -294,20 +328,33 @@ class MainWindow(wx.Frame):
                 flag_and_voice_list.append(f'{flags[code]} {v}')
 
         voice_label = wx.StaticText(panel, label="Voice:")
-        default_voice = flag_and_voice_list[0]
-        self.selected_voice = default_voice
-        voice_dropdown = wx.ComboBox(panel, choices=flag_and_voice_list, value=default_voice)
-        voice_dropdown.Bind(wx.EVT_COMBOBOX, self.on_select_voice)
-        sizer.Add(voice_label, pos=(1, 0), flag=wx.ALL, border=border)
-        sizer.Add(voice_dropdown, pos=(1, 1), flag=wx.ALL, border=border)
+        # Determine default/saved voice
+        saved_voice = self.user_settings.get('voice')
+        if saved_voice and saved_voice in flag_and_voice_list:
+            self.selected_voice = saved_voice
+        else:
+            self.selected_voice = flag_and_voice_list[0] if flag_and_voice_list else ""
 
-        # Add dropdown for speed
+        self.voice_dropdown = wx.ComboBox(panel, choices=flag_and_voice_list, value=self.selected_voice)
+        self.voice_dropdown.Bind(wx.EVT_COMBOBOX, self.on_select_voice)
+        sizer.Add(voice_label, pos=(1, 0), flag=wx.ALL, border=border)
+        sizer.Add(self.voice_dropdown, pos=(1, 1), flag=wx.ALL, border=border)
+
+        # Add text input for speed
         speed_label = wx.StaticText(panel, label="Speed:")
-        speed_text_input = wx.TextCtrl(panel, value="1.0")
-        self.selected_speed = '1.0'
-        speed_text_input.Bind(wx.EVT_TEXT, self.on_select_speed)
+        saved_speed = self.user_settings.get('speed')
+        if saved_speed is not None:
+            try:
+                self.selected_speed = float(saved_speed)
+            except ValueError:
+                self.selected_speed = 1.0 # Default if conversion fails
+        else:
+            self.selected_speed = 1.0 # Default if not set
+
+        self.speed_text_input = wx.TextCtrl(panel, value=str(self.selected_speed))
+        self.speed_text_input.Bind(wx.EVT_TEXT, self.on_select_speed)
         sizer.Add(speed_label, pos=(2, 0), flag=wx.ALL, border=border)
-        sizer.Add(speed_text_input, pos=(2, 1), flag=wx.ALL, border=border)
+        sizer.Add(self.speed_text_input, pos=(2, 1), flag=wx.ALL, border=border)
 
         # Add file dialog selector to select output folder
         output_folder_label = wx.StaticText(panel, label="Output Folder:")
@@ -357,6 +404,26 @@ class MainWindow(wx.Frame):
         self.eta_label.Hide()
         sizer.Add(self.eta_label, 0, wx.ALL, 5)
 
+        # Add Custom Rate input
+        custom_rate_label = wx.StaticText(panel, label="Custom Rate (chars/sec, experimental):")
+        sizer.Add(custom_rate_label, 0, wx.ALL, 5)
+
+        saved_custom_rate = self.user_settings.get('custom_rate')
+        initial_custom_rate_value = ""
+        if saved_custom_rate is not None:
+            try:
+                self.custom_rate = int(saved_custom_rate)
+                initial_custom_rate_value = str(self.custom_rate)
+            except ValueError:
+                self.custom_rate = None # Or a default int like 750
+                print(f"Warning: Could not parse saved custom_rate '{saved_custom_rate}'")
+        else:
+            self.custom_rate = None # Default if not set
+
+        self.custom_rate_text_ctrl = wx.TextCtrl(panel, value=initial_custom_rate_value)
+        self.custom_rate_text_ctrl.Bind(wx.EVT_TEXT, self.on_set_custom_rate)
+        sizer.Add(self.custom_rate_text_ctrl, 0, wx.ALL | wx.EXPAND, 5)
+
     def open_output_folder_dialog(self, event):
         with wx.DirDialog(self, "Choose a directory:", style=wx.DD_DEFAULT_STYLE) as dialog:
             if dialog.ShowModal() == wx.ID_CANCEL:
@@ -367,11 +434,59 @@ class MainWindow(wx.Frame):
 
     def on_select_voice(self, event):
         self.selected_voice = event.GetString()
+        save_user_setting('voice', self.selected_voice)
+        print(f"Voice set to {self.selected_voice} and saved.")
+
+    def on_set_custom_rate(self, event):
+        rate_str = event.GetString()
+        if not rate_str: # Empty input
+            self.custom_rate = None
+            save_user_setting('custom_rate', None)
+            print("Custom rate cleared and saved.")
+            return
+
+        try:
+            rate = int(rate_str)
+            if rate > 0:
+                self.custom_rate = rate
+                save_user_setting('custom_rate', self.custom_rate)
+                print(f"Custom rate set to {self.custom_rate} and saved.")
+            # else: # Negative or zero, could show an error or ignore
+            #    print(f"Invalid custom rate (must be positive): {rate_str}")
+            #    if self.custom_rate is not None: # Reset to last valid or None
+            #       self.custom_rate_text_ctrl.SetValue(str(self.custom_rate) if self.custom_rate else "")
+            #    else:
+            #       self.custom_rate_text_ctrl.SetValue("")
+
+        except ValueError:
+            # Non-integer input, ignore for now or show error
+            print(f"Invalid custom rate input (must be an integer): {rate_str}")
+            # Optionally reset text ctrl to last valid self.custom_rate or empty
+            # if self.custom_rate is not None:
+            #    self.custom_rate_text_ctrl.SetValue(str(self.custom_rate))
+            # else:
+            #    self.custom_rate_text_ctrl.SetValue("")
+
 
     def on_select_speed(self, event):
-        speed = float(event.GetString())
-        print('Selected speed', speed)
-        self.selected_speed = speed
+        try:
+            speed_str = event.GetString()
+            # Allow empty string or partial input without immediate error
+            if not speed_str:
+                # self.selected_speed remains unchanged or you can set a temp invalid state
+                return
+
+            speed = float(speed_str)
+            if speed > 0: # Basic validation
+                self.selected_speed = speed
+                save_user_setting('speed', self.selected_speed)
+                print(f'Selected speed {self.selected_speed} and saved.')
+            # else: provide feedback for invalid speed if desired
+        except ValueError:
+            # Handle cases like "1.a" - often wx yields char by char
+            # For now, just print error or ignore. User will see input not fully numeric.
+            print(f"Invalid speed input: {event.GetString()}")
+            # Optionally, reset to last valid speed or show error in UI
 
     def open_epub(self, file_path):
         # Cleanup previous layout
