@@ -98,6 +98,7 @@ This plan outlines the steps to implement the features described in `audiblez/fe
 *   **Phase 1.6: State Persistence and UI Updates**
     *   Modify the synthesis process to update the status of chapters in the database as they are completed.
     *   Update the UI to reflect the status of chapters in the "Staging" tab (e.g., replace checkbox with a checkmark for completed chapters).
+    *   Add the ability to remove items from the staging area and queue as well as the database when doing so.
     *   Implement loading the state of staged books, chapters, and the queue from the database on application startup.
 *   **Phase 1.7: Scheduling Functionality**
     *   Add a "Schedule Queue" button at the bottom of the "Queue" tab.
