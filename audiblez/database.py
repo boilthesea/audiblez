@@ -51,9 +51,10 @@ def create_tables(conn: sqlite3.Connection):
         CREATE TABLE IF NOT EXISTS staged_chapters (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             book_id INTEGER,
-            chapter_number INTEGER,
+            chapter_number INTEGER, -- Order within the book
             title TEXT,
             text_content TEXT,
+            is_selected_for_synthesis BOOLEAN DEFAULT 1, -- Whether this chapter is selected for final compilation
             status TEXT DEFAULT 'pending', -- e.g., pending, queued, processing, completed, error
             queued_order INTEGER, -- order in the main synthesis queue if applicable
             FOREIGN KEY (book_id) REFERENCES staged_books (id) ON DELETE CASCADE
@@ -193,5 +194,142 @@ def load_all_user_settings() -> dict:
     except sqlite3.Error as e:
         print(f"Database error in load_all_user_settings: {e}")
         return settings # Return empty settings dict on error
+    finally:
+        conn.close()
+
+
+def add_staged_book(title: str, author: str, source_path: str, output_folder: str, chapters: list) -> int | None:
+    """Adds a book and its chapters to the staging tables.
+
+    Args:
+        title (str): Book title.
+        author (str): Book author.
+        source_path (str): Path to the source EPUB file.
+        output_folder (str): Default output folder for this book.
+        chapters (list): A list of dictionaries, where each dictionary represents a chapter
+                         and contains 'chapter_number', 'title', 'text_content',
+                         and 'is_selected_for_synthesis'.
+
+    Returns:
+        int | None: The ID of the newly added staged_book, or None if an error occurs.
+    """
+    conn = connect_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            INSERT INTO staged_books (title, author, source_path, output_folder, final_compilation)
+            VALUES (?, ?, ?, ?, 0)
+        """, (title, author, source_path, output_folder))
+        book_id = cursor.lastrowid
+        if not book_id:
+            conn.rollback()
+            return None
+
+        staged_chapters_data = []
+        for chap in chapters:
+            staged_chapters_data.append((
+                book_id,
+                chap.get('chapter_number'),
+                chap.get('title'),
+                chap.get('text_content'),
+                chap.get('is_selected_for_synthesis', 1) # Default to selected
+            ))
+
+        cursor.executemany("""
+            INSERT INTO staged_chapters (book_id, chapter_number, title, text_content, is_selected_for_synthesis)
+            VALUES (?, ?, ?, ?, ?)
+        """, staged_chapters_data)
+
+        conn.commit()
+        return book_id
+    except sqlite3.IntegrityError as e: # Handles UNIQUE constraint violation for source_path
+        print(f"Database IntegrityError in add_staged_book (possibly duplicate source_path): {e}")
+        conn.rollback()
+        return None
+    except sqlite3.Error as e:
+        print(f"Database error in add_staged_book: {e}")
+        conn.rollback()
+        return None
+    finally:
+        conn.close()
+
+def get_staged_books_with_chapters() -> list:
+    """Retrieves all staged books along with their chapters.
+
+    Returns:
+        list: A list of dictionaries, where each dictionary represents a book
+              and contains 'id', 'title', 'author', 'source_path', 'output_folder',
+              'final_compilation', and a 'chapters' list. Each chapter in the
+              'chapters' list is a dictionary with its details.
+              Returns an empty list if no books are staged or an error occurs.
+    """
+    conn = connect_db()
+    cursor = conn.cursor()
+    books_dict = {}
+    try:
+        # Fetch all books
+        cursor.execute("SELECT id, title, author, source_path, output_folder, final_compilation FROM staged_books ORDER BY added_timestamp DESC")
+        books_data = cursor.fetchall()
+
+        for book_row in books_data:
+            book_id, title, author, source_path, output_folder, final_compilation = book_row
+            books_dict[book_id] = {
+                'id': book_id,
+                'title': title,
+                'author': author,
+                'source_path': source_path,
+                'output_folder': output_folder,
+                'final_compilation': bool(final_compilation),
+                'chapters': []
+            }
+
+        # Fetch all chapters and assign them to their respective books
+        cursor.execute("""
+            SELECT book_id, id, chapter_number, title, text_content, is_selected_for_synthesis, status
+            FROM staged_chapters ORDER BY book_id, chapter_number ASC
+        """)
+        chapters_data = cursor.fetchall()
+
+        for chap_row in chapters_data:
+            book_id, chap_id, chap_num, chap_title, chap_text, is_selected, status = chap_row
+            if book_id in books_dict:
+                books_dict[book_id]['chapters'].append({
+                    'id': chap_id,
+                    'chapter_number': chap_num,
+                    'title': chap_title,
+                    'text_content': chap_text, # Consider if text_content is always needed here or fetched on demand
+                    'is_selected_for_synthesis': bool(is_selected),
+                    'status': status
+                })
+
+        return list(books_dict.values())
+
+    except sqlite3.Error as e:
+        print(f"Database error in get_staged_books_with_chapters: {e}")
+        return []
+    finally:
+        conn.close()
+
+def update_staged_chapter_selection(chapter_id: int, is_selected: bool):
+    """Updates the selection status of a staged chapter."""
+    conn = connect_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("UPDATE staged_chapters SET is_selected_for_synthesis = ? WHERE id = ?", (is_selected, chapter_id))
+        conn.commit()
+    except sqlite3.Error as e:
+        print(f"Database error in update_staged_chapter_selection: {e}")
+    finally:
+        conn.close()
+
+def update_staged_book_final_compilation(book_id: int, final_compilation: bool):
+    """Updates the final compilation status of a staged book."""
+    conn = connect_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("UPDATE staged_books SET final_compilation = ? WHERE id = ?", (final_compilation, book_id))
+        conn.commit()
+    except sqlite3.Error as e:
+        print(f"Database error in update_staged_book_final_compilation: {e}")
     finally:
         conn.close()

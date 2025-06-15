@@ -65,6 +65,7 @@ class MainWindow(wx.Frame):
 
         self.Centre()
         self.Show(True)
+        # wx.CallAfter(self.refresh_staging_tab) # Removed: Staging tab doesn't exist yet
         if Path('../epub/lewis.epub').exists(): self.open_epub('../epub/lewis.epub')
 
     def create_menu(self):
@@ -171,20 +172,43 @@ class MainWindow(wx.Frame):
         self.splitter.SetSizer(self.splitter_sizer)
 
         self.main_sizer.Add(top_panel, 0, wx.ALL | wx.EXPAND, 5)
-        self.main_sizer.Add(self.splitter, 1, wx.EXPAND)
+        self.main_sizer.Add(self.splitter, 1, wx.EXPAND) # self.splitter is a Panel that will be split by self.splitter_sizer
 
-    def create_layout_for_ebook(self, splitter):
-        splitter_left = wx.Panel(splitter, -1)
-        splitter_right = wx.Panel(self.splitter)
-        self.splitter_left, self.splitter_right = splitter_left, splitter_right
-        self.splitter_sizer.Add(splitter_left, 1, wx.ALL | wx.EXPAND, 5)
-        self.splitter_sizer.Add(splitter_right, 2, wx.ALL | wx.EXPAND, 5)
+        # self.splitter_left, self.splitter_right, and self.notebook are NOT created here.
+        # They will be created in open_epub().
+        # The main area (self.splitter) will be empty initially below the top_panel.
 
-        self.left_sizer = wx.BoxSizer(wx.VERTICAL)
-        splitter_left.SetSizer(self.left_sizer)
+    def create_layout_for_ebook(self, splitter_container): # splitter_container is self.splitter (the main one)
+        # This function is called from open_epub, after self.splitter_left and self.notebook are created.
+        # It populates the "Chapters" tab and creates/populates self.splitter_right.
 
-        # add center panel with large text area
-        self.center_panel = wx.Panel(splitter_right)
+        # 1. Populate the "Chapters" tab (self.chapters_tab_page)
+        # self.chapters_tab_page is a wx.Panel created in open_epub, acting as a container for the chapter list.
+
+        # Clear any old content from this page container
+        for child in self.chapters_tab_page.GetChildren():
+            child.Destroy()
+
+        # Create the actual chapters list panel (ScrolledPanel) using create_chapters_table_panel.
+        # Its parent will be self.chapters_tab_page.
+        # self.document_chapters is assumed to be set by open_epub.
+        # good_chapters logic is handled within create_chapters_table_panel.
+        self.chapters_panel = self.create_chapters_table_panel(self.document_chapters) # This returns the ScrolledPanel
+
+        # Add this ScrolledPanel (self.chapters_panel) to the sizer of self.chapters_tab_page
+        chapters_page_sizer = wx.BoxSizer(wx.VERTICAL)
+        chapters_page_sizer.Add(self.chapters_panel, 1, wx.EXPAND | wx.ALL) # Add the ScrolledPanel
+        self.chapters_tab_page.SetSizer(chapters_page_sizer)
+        self.chapters_tab_page.Layout()
+
+        # 2. Create and populate self.splitter_right
+        # self.splitter_right should not exist at this point due to cleanup in open_epub
+        self.splitter_right = wx.Panel(splitter_container) # Parent is self.splitter
+        self.splitter_sizer.Add(self.splitter_right, 2, wx.ALL | wx.EXPAND, 5) # Add to main splitter sizer
+
+        # Now, create the content for self.splitter_right: center_panel and right_panel
+        # (These are for text_area, book details, params, synth status)
+        self.center_panel = wx.Panel(self.splitter_right) # Parent is self.splitter_right
         self.center_sizer = wx.BoxSizer(wx.VERTICAL)
         self.center_panel.SetSizer(self.center_sizer)
         self.text_area = wx.TextCtrl(self.center_panel, style=wx.TE_MULTILINE, size=(int(self.window_width * 0.4), -1))
@@ -203,9 +227,9 @@ class MainWindow(wx.Frame):
         self.center_sizer.Add(self.text_area, 1, wx.ALL | wx.EXPAND, 5)
 
         splitter_right_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        splitter_right.SetSizer(splitter_right_sizer)
+        self.splitter_right.SetSizer(splitter_right_sizer) # Use self.splitter_right
 
-        self.create_right_panel(splitter_right)
+        self.create_right_panel(self.splitter_right) # Use self.splitter_right
         splitter_right_sizer.Add(self.center_panel, 1, wx.ALL | wx.EXPAND, 5)
         splitter_right_sizer.Add(self.right_panel, 1, wx.ALL | wx.EXPAND, 5)
 
@@ -489,15 +513,23 @@ class MainWindow(wx.Frame):
             # Optionally, reset to last valid speed or show error in UI
 
     def open_epub(self, file_path):
-        # Cleanup previous layout
-        if hasattr(self, 'selected_book'):
-            self.splitter.DestroyChildren()
+        # Cleanup previous dynamic UI parts if they exist
+        if hasattr(self, 'splitter_left') and self.splitter_left:
+            self.splitter_left.Destroy()
+            self.splitter_left = None # Ensure it's cleared
+        if hasattr(self, 'splitter_right') and self.splitter_right:
+            self.splitter_right.Destroy()
+            self.splitter_right = None # Ensure it's cleared
+        # Note: Destroying children of splitter_sizer is implicitly handled by destroying splitter_left/right windows.
+        # self.splitter_sizer.Clear(delete_windows=True) # Alternative, but Destroy() above is often better.
 
         self.selected_file_path = file_path
-        print(f"Opening file: {file_path}")  # Do something with the filepath (e.g., parse the EPUB)
+        print(f"Opening file: {file_path}")
 
         from ebooklib import epub
         from audiblez.core import find_document_chapters_and_extract_texts, find_good_chapters, find_cover
+
+        # Parse EPUB and extract metadata ONCE
         book = epub.read_epub(file_path)
         meta_title = book.get_metadata('DC', 'title')
         self.selected_book_title = meta_title[0][0] if meta_title else ''
@@ -505,42 +537,77 @@ class MainWindow(wx.Frame):
         self.selected_book_author = meta_creator[0][0] if meta_creator else ''
         self.selected_book = book
 
+        # Determine document chapters ONCE
         self.document_chapters = find_document_chapters_and_extract_texts(book)
-        good_chapters = find_good_chapters(self.document_chapters)
-        self.selected_chapter = good_chapters[0]
+
+        # Determine good chapters list ONCE and store as instance variable
+        self.good_chapters_list = find_good_chapters(self.document_chapters)
+
+        # Determine selected_chapter based on good_chapters_list or document_chapters
+        if self.good_chapters_list:
+            self.selected_chapter = self.good_chapters_list[0]
+        elif self.document_chapters: # Fallback if no good chapters but document chapters exist
+            self.selected_chapter = self.document_chapters[0]
+        else:
+            self.selected_chapter = None
+            # Consider: wx.LogWarning("No chapters found in the EPUB.") or similar feedback.
+
+        # Process all chapters for short_name and initial selection status ONCE
         for chapter in self.document_chapters:
             chapter.short_name = chapter.get_name().replace('.xhtml', '').replace('xhtml/', '').replace('.html', '').replace('Text/', '')
-            chapter.is_selected = chapter in good_chapters
+            chapter.is_selected = chapter in self.good_chapters_list # Use instance var for consistency
 
-        self.create_layout_for_ebook(self.splitter)
+        # Create left panel and notebook structure
+        self.splitter_left = wx.Panel(self.splitter, -1)
+        self.left_sizer = wx.BoxSizer(wx.VERTICAL)
+        self.splitter_left.SetSizer(self.left_sizer)
 
-        # Update Cover
-        cover = find_cover(book)
-        if cover is not None:
-            pil_image = Image.open(io.BytesIO(cover.content))
-            wx_img = wx.EmptyImage(pil_image.size[0], pil_image.size[1])
-            wx_img.SetData(pil_image.convert("RGB").tobytes())
-            cover_h = 200
-            cover_w = int(cover_h * pil_image.size[0] / pil_image.size[1])
-            wx_img.Rescale(cover_w, cover_h)
-            self.cover_bitmap.SetBitmap(wx_img.ConvertToBitmap())
-            self.cover_bitmap.SetMaxSize((200, cover_h))
+        self.notebook = wx.Notebook(self.splitter_left)
 
-        chapters_panel = self.create_chapters_table_panel(good_chapters)
+        # Chapters Tab (Page container; content will be ScrolledPanel from create_chapters_table_panel)
+        self.chapters_tab_page = wx.Panel(self.notebook)
+        self.notebook.AddPage(self.chapters_tab_page, "Chapters")
+        # self.chapters_panel (the ScrolledPanel) is created in create_layout_for_ebook and placed in chapters_tab_page
 
-        #  chapters_panel to left_sizer, or replace if it exists already
-        if self.chapters_panel:
-            self.left_sizer.Replace(self.chapters_panel, chapters_panel)
-            self.chapters_panel.Destroy()
-            self.chapters_panel = chapters_panel
-        else:
-            self.left_sizer.Add(chapters_panel, 1, wx.ALL | wx.EXPAND, 5)
-            self.chapters_panel = chapters_panel
+        # Staging Tab Panel (This is the ScrolledPanel itself)
+        self.staging_tab_panel = ScrolledPanel(self.notebook, -1, style=wx.TAB_TRAVERSAL | wx.SUNKEN_BORDER)
+        self.staging_tab_sizer = wx.BoxSizer(wx.VERTICAL)
+        self.staging_tab_panel.SetSizer(self.staging_tab_sizer)
+        self.notebook.AddPage(self.staging_tab_panel, "Staging")
 
-        # These two are very important:
-        self.splitter_left.Layout()
-        self.splitter_right.Layout()
-        self.splitter.Layout()
+        # Queue Tab Panel (Placeholder)
+        self.queue_tab_panel = wx.Panel(self.notebook)
+        ql = wx.StaticText(self.queue_tab_panel, label="Queue functionality will be implemented here.")
+        qs = wx.BoxSizer(wx.VERTICAL)
+        qs.Add(ql, 0, wx.ALL|wx.CENTER, 10)
+        self.queue_tab_panel.SetSizer(qs)
+        self.notebook.AddPage(self.queue_tab_panel, "Queue")
+
+        self.left_sizer.Add(self.notebook, 1, wx.ALL | wx.EXPAND, 5)
+        self.splitter_sizer.Add(self.splitter_left, 1, wx.ALL | wx.EXPAND, 5)
+
+        # Create right panel and populate chapters tab
+        self.create_layout_for_ebook(self.splitter) # self.splitter is the parent for splitter_right
+
+        # Update Cover (ensure self.cover_bitmap exists, created in create_right_panel part of create_layout_for_ebook)
+        if hasattr(self, 'cover_bitmap'):
+            cover = find_cover(book)
+            if cover is not None:
+                pil_image = Image.open(io.BytesIO(cover.content))
+                wx_img = wx.EmptyImage(pil_image.size[0], pil_image.size[1])
+                wx_img.SetData(pil_image.convert("RGB").tobytes())
+                cover_h = 200
+                cover_w = int(cover_h * pil_image.size[0] / pil_image.size[1])
+                wx_img.Rescale(cover_w, cover_h)
+                self.cover_bitmap.SetBitmap(wx_img.ConvertToBitmap())
+                self.cover_bitmap.SetMaxSize((200, cover_h))
+            else:
+                self.cover_bitmap.SetBitmap(wx.NullBitmap) # Clear old cover
+
+        self.refresh_staging_tab() # Now that staging_tab_panel exists
+
+        self.splitter.Layout() # Layout the main splitter panel
+        self.Layout() # Layout the main frame
 
     def on_table_checked(self, event):
         self.document_chapters[event.GetIndex()].is_selected = True
@@ -555,8 +622,9 @@ class MainWindow(wx.Frame):
         self.text_area.SetValue(chapter.extracted_text)
         self.chapter_label.SetLabel(f'Edit / Preview content for section "{chapter.short_name}":')
 
-    def create_chapters_table_panel(self, good_chapters):
-        panel = ScrolledPanel(self.splitter_left, -1, style=wx.TAB_TRAVERSAL | wx.SUNKEN_BORDER)
+    def create_chapters_table_panel(self, document_chapters_list):
+        # Parent of this ScrolledPanel should be self.chapters_tab_page (the wx.Panel for "Chapters" tab)
+        panel = ScrolledPanel(self.chapters_tab_page, -1, style=wx.TAB_TRAVERSAL | wx.SUNKEN_BORDER)
         sizer = wx.BoxSizer(wx.VERTICAL)
         panel.SetSizer(sizer)
 
@@ -575,15 +643,126 @@ class MainWindow(wx.Frame):
         table.Bind(wx.EVT_LIST_ITEM_UNCHECKED, self.on_table_unchecked)
         table.Bind(wx.EVT_LIST_ITEM_SELECTED, self.on_table_selected)
 
-        for i, chapter in enumerate(self.document_chapters):
-            auto_selected = chapter in good_chapters
+        # self.good_chapters_list should be available here, set in open_epub
+        for i, chapter in enumerate(document_chapters_list): # Use the passed argument
+            auto_selected = chapter in self.good_chapters_list
             table.Append(['', chapter.short_name, f"{len(chapter.extracted_text):,}"])
-            if auto_selected: table.CheckItem(i)
+            if auto_selected:
+                table.CheckItem(i)
+            # Ensure chapter.is_selected is consistent if it wasn't set by open_epub's loop,
+            # though it should be. This is more about table checking.
+            # chapter.is_selected = auto_selected # This line is redundant if open_epub already set it.
 
         title_text = wx.StaticText(panel, label=f"Select chapters to include in the audiobook:")
         sizer.Add(title_text, 0, wx.ALL, 5)
         sizer.Add(table, 1, wx.ALL | wx.EXPAND, 5)
+
+        stage_book_button = wx.Button(panel, label="📚 Stage Book for Batching")
+        stage_book_button.Bind(wx.EVT_BUTTON, self.on_stage_book)
+        sizer.Add(stage_book_button, 0, wx.ALL | wx.ALIGN_CENTER, 10)
+
         return panel
+
+    def on_stage_book(self, event):
+        if not hasattr(self, 'selected_book') or not self.selected_book:
+            wx.MessageBox("Please open an EPUB file first.", "No Book Loaded", wx.OK | wx.ICON_INFORMATION)
+            return
+
+        book_title = self.selected_book_title
+        book_author = self.selected_book_author
+        source_path = self.selected_file_path
+        output_folder = self.output_folder_text_ctrl.GetValue()
+
+        chapters_to_stage = []
+        for i, chapter_obj in enumerate(self.document_chapters):
+            chapters_to_stage.append({
+                'chapter_number': i, # or some other persistent chapter identifier if available
+                'title': chapter_obj.short_name,
+                'text_content': chapter_obj.extracted_text,
+                'is_selected_for_synthesis': chapter_obj.is_selected
+            })
+
+        from audiblez.database import add_staged_book # Import moved here for clarity
+        book_id = add_staged_book(book_title, book_author, source_path, output_folder, chapters_to_stage)
+
+        if book_id is not None:
+            wx.MessageBox(f"Book '{book_title}' and its chapters have been staged.", "Book Staged", wx.OK | wx.ICON_INFORMATION)
+            self.refresh_staging_tab()
+        elif source_path:
+             wx.MessageBox(f"Book '{book_title}' (from {source_path}) might already be staged. Cannot add duplicate.", "Staging Failed", wx.OK | wx.ICON_ERROR)
+        else:
+            wx.MessageBox("Failed to stage the book. Check logs for details.", "Staging Failed", wx.OK | wx.ICON_ERROR)
+
+    def refresh_staging_tab(self):
+        # Clear existing content
+        for child in self.staging_tab_sizer.GetChildren():
+            child.GetWindow().Destroy()
+
+        from audiblez.database import get_staged_books_with_chapters, update_staged_chapter_selection, update_staged_book_final_compilation
+
+        staged_books = get_staged_books_with_chapters()
+
+        if not staged_books:
+            no_books_label = wx.StaticText(self.staging_tab_panel, label="No books have been staged yet.")
+            self.staging_tab_sizer.Add(no_books_label, 0, wx.ALL | wx.ALIGN_CENTER, 15)
+        else:
+            for book in staged_books:
+                book_box = wx.StaticBox(self.staging_tab_panel, label=f"{book['title']} (Author: {book.get('author', 'N/A')})")
+                book_sizer = wx.StaticBoxSizer(book_box, wx.VERTICAL)
+
+                # Final Compilation Checkbox for the book
+                # Parent should be book_box for proper visual grouping and lifecycle management with the StaticBox
+                final_comp_checkbox = wx.CheckBox(book_box, label="Enable Final Compilation for this Book")
+                final_comp_checkbox.SetValue(book['final_compilation'])
+                final_comp_checkbox.Bind(wx.EVT_CHECKBOX,
+                                         lambda evt, b_id=book['id']:
+                                         update_staged_book_final_compilation(b_id, evt.IsChecked()))
+                book_sizer.Add(final_comp_checkbox, 0, wx.ALL | wx.ALIGN_LEFT, 5)
+
+                # Chapters list for the book
+                if book['chapters']:
+                    # Parent of chapters_list_ctrl should be book_box, not self.staging_tab_panel
+                    chapters_list_ctrl = wx.ListCtrl(book_box, style=wx.LC_REPORT | wx.BORDER_SUNKEN)
+                    chapters_list_ctrl.InsertColumn(0, "Include", width=70)
+                    chapters_list_ctrl.InsertColumn(1, "Chapter Title", width=200) # Adjust width as needed
+                    chapters_list_ctrl.InsertColumn(2, "Status", width=100)
+                    chapters_list_ctrl.EnableCheckBoxes()
+
+                    for i, chap in enumerate(book['chapters']):
+                        chapters_list_ctrl.InsertItem(i, "") # Checkbox column
+                        chapters_list_ctrl.SetItem(i, 1, chap['title'])
+                        chapters_list_ctrl.SetItem(i, 2, chap['status'])
+                        if chap['is_selected_for_synthesis']:
+                            chapters_list_ctrl.CheckItem(i)
+
+                        # Store chapter_id with the item for the event handler
+                        chapters_list_ctrl.SetItemData(i, chap['id'])
+
+                    # Define event handler for this specific chapters_list_ctrl
+                    def create_chapter_check_handler(list_ctrl_instance):
+                        def on_chapter_check(event):
+                            chapter_idx = event.GetIndex()
+                            chapter_id = list_ctrl_instance.GetItemData(chapter_idx)
+                            is_checked = list_ctrl_instance.IsItemChecked(chapter_idx)
+                            update_staged_chapter_selection(chapter_id, is_checked)
+                        return on_chapter_check
+
+                    handler = create_chapter_check_handler(chapters_list_ctrl)
+                    chapters_list_ctrl.Bind(wx.EVT_LIST_ITEM_CHECKED, handler)
+                    chapters_list_ctrl.Bind(wx.EVT_LIST_ITEM_UNCHECKED, handler)
+                    book_sizer.Add(chapters_list_ctrl, 1, wx.ALL | wx.EXPAND, 5)
+                else:
+                    # Parent of no_chapters_label should be book_box
+                    no_chapters_label = wx.StaticText(book_box, label="This book has no chapters.")
+                    book_sizer.Add(no_chapters_label, 0, wx.ALL, 5)
+
+                self.staging_tab_sizer.Add(book_sizer, 0, wx.ALL | wx.EXPAND, 10)
+
+        self.staging_tab_panel.SetupScrolling()
+        self.staging_tab_panel.Layout()
+        # self.Layout() # Main frame layout, might be too broad, staging_tab_panel.Layout() should suffice.
+        self.splitter.Layout() # Layout the main splitter that contains left and right
+        self.Layout() # Full frame layout might be needed if sizers changed overall frame size.
 
     def get_selected_voice(self):
         return self.selected_voice.split(' ')[1]
