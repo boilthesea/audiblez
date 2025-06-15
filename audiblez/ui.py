@@ -16,9 +16,11 @@ from wx.lib.scrolledpanel import ScrolledPanel
 from PIL import Image
 from tempfile import NamedTemporaryFile
 from pathlib import Path
+import audiblez.database as db # Changed import for clarity
+import json # For settings
 
 from audiblez.voices import voices, flags
-from audiblez.database import load_all_user_settings, save_user_setting
+# from audiblez.database import load_all_user_settings, save_user_setting # Now use db. prefix
 
 EVENTS = {
     'CORE_STARTED': NewEvent(),
@@ -52,7 +54,7 @@ class MainWindow(wx.Frame):
         self.create_layout()
 
         # Load user settings
-        self.user_settings = load_all_user_settings()
+        self.user_settings = db.load_all_user_settings() # Use db prefix
         if not self.user_settings: # Ensure it's a dict
             self.user_settings = {}
 
@@ -63,10 +65,95 @@ class MainWindow(wx.Frame):
         self.selected_speed = 1.0 # Default speed
         self.custom_rate = None # Default custom rate
 
+        self.queue_processing_active = False
+        self.current_queue_item_index = -1 # To track which item in self.queue_items is being processed
+        self.run_queue_button = None # To enable/disable run queue button
+
+        # Load queue from database on startup
+        self.queue_items = db.get_queued_items()
+
         self.Centre()
         self.Show(True)
-        # wx.CallAfter(self.refresh_staging_tab) # Removed: Staging tab doesn't exist yet
-        if Path('../epub/lewis.epub').exists(): self.open_epub('../epub/lewis.epub')
+
+        # Ensure notebook and tabs are created, then refresh them.
+        self.create_notebook_and_tabs()
+        wx.CallAfter(self._initial_ui_refresh) # Refresh tabs after UI is fully up
+
+        default_epub_path = Path('../epub/lewis.epub')
+        if default_epub_path.exists():
+            wx.CallAfter(self.open_epub, str(default_epub_path))
+
+
+    def _initial_ui_refresh(self):
+        if not hasattr(self, 'notebook'):
+            print("Notebook not created, cannot perform initial UI refresh.")
+            return
+        self.refresh_queue_tab()
+        self.refresh_staging_tab()
+
+
+    def create_notebook_and_tabs(self):
+        if hasattr(self, 'notebook') and self.notebook:
+            # Notebook and basic tabs might have been created by a previous call or open_epub
+            # Ensure sizers exist if we are re-entering or setting up lazily
+            if not hasattr(self, 'queue_tab_sizer') and hasattr(self, 'queue_tab_panel') and self.queue_tab_panel:
+                self.queue_tab_sizer = wx.BoxSizer(wx.VERTICAL)
+                self.queue_tab_panel.SetSizer(self.queue_tab_sizer)
+            if not hasattr(self, 'staging_tab_sizer') and hasattr(self, 'staging_tab_panel') and self.staging_tab_panel:
+                self.staging_tab_sizer = wx.BoxSizer(wx.VERTICAL)
+                self.staging_tab_panel.SetSizer(self.staging_tab_sizer)
+            return
+
+        if not hasattr(self, 'splitter_left') or not self.splitter_left:
+            if not hasattr(self, 'splitter') or not self.splitter:
+                 print("Error: Main splitter panel does not exist. Cannot create notebook.")
+                 return
+            self.splitter_left = wx.Panel(self.splitter, -1)
+            self.left_sizer = wx.BoxSizer(wx.VERTICAL)
+            self.splitter_left.SetSizer(self.left_sizer)
+            # Add splitter_left to the main splitter_sizer
+            self.splitter_sizer.Add(self.splitter_left, 1, wx.ALL | wx.EXPAND, 5)
+
+        self.notebook = wx.Notebook(self.splitter_left)
+
+        # Chapters Tab
+        self.chapters_tab_page = wx.Panel(self.notebook)
+        self.notebook.AddPage(self.chapters_tab_page, "Chapters")
+        chapters_page_sizer = wx.BoxSizer(wx.VERTICAL) # Create sizer for chapters page
+        self.chapters_tab_page.SetSizer(chapters_page_sizer) # Set sizer
+        if not hasattr(self, 'chapters_panel'): # If open_epub hasn't run
+            placeholder_text = wx.StaticText(self.chapters_tab_page, label="Open an EPUB file to see chapters here.")
+            chapters_page_sizer.Add(placeholder_text, 0, wx.ALL | wx.ALIGN_CENTER, 15)
+            self.chapters_tab_page.Layout()
+
+        # Staging Tab Panel
+        self.staging_tab_panel = ScrolledPanel(self.notebook, -1, style=wx.TAB_TRAVERSAL | wx.SUNKEN_BORDER)
+        self.staging_tab_sizer = wx.BoxSizer(wx.VERTICAL)
+        self.staging_tab_panel.SetSizer(self.staging_tab_sizer)
+        self.notebook.AddPage(self.staging_tab_panel, "Staging")
+        if not self.staging_tab_sizer.GetChildren():
+            placeholder_staging = wx.StaticText(self.staging_tab_panel, label="Staged books will appear here.")
+            self.staging_tab_sizer.Add(placeholder_staging, 0, wx.ALL | wx.ALIGN_CENTER, 15)
+            self.staging_tab_panel.Layout()
+            self.staging_tab_panel.SetupScrolling()
+
+        # Queue Tab Panel
+        self.queue_tab_panel = ScrolledPanel(self.notebook, -1, style=wx.TAB_TRAVERSAL | wx.SUNKEN_BORDER)
+        self.queue_tab_sizer = wx.BoxSizer(wx.VERTICAL)
+        self.queue_tab_panel.SetSizer(self.queue_tab_sizer)
+        self.notebook.AddPage(self.queue_tab_panel, "Queue")
+        if not self.queue_tab_sizer.GetChildren():
+            placeholder_queue = wx.StaticText(self.queue_tab_panel, label="Queued items will appear here.")
+            self.queue_tab_sizer.Add(placeholder_queue, 0, wx.ALL | wx.ALIGN_CENTER, 15)
+            self.queue_tab_panel.Layout()
+            self.queue_tab_panel.SetupScrolling()
+
+        self.left_sizer.Add(self.notebook, 1, wx.ALL | wx.EXPAND, 5)
+
+        if hasattr(self.splitter_left, 'Layout'): self.splitter_left.Layout()
+        if hasattr(self.splitter, 'Layout'): self.splitter.Layout()
+        self.Layout()
+
 
     def create_menu(self):
         menubar = wx.MenuBar()
@@ -109,8 +196,38 @@ class MainWindow(wx.Frame):
         self.synth_panel.Layout()
 
     def on_core_finished(self, event):
-        self.synthesis_in_progress = False
-        self.open_folder_with_explorer(self.output_folder_text_ctrl.GetValue())
+        self.synthesis_in_progress = False # This is for single book synthesis
+        # For queue, self.queue_processing_active is used.
+
+        # If queue was active, on_core_finished handles the next item or cleanup
+        if self.queue_processing_active:
+            if self.current_queue_item_index < len(self.queue_items):
+                 # Update status of the completed item
+                item_data = self.queue_items[self.current_queue_item_index] # This is a reference from self.queue_items
+                # Ensure 'id' exists, as it's crucial for DB updates.
+                if 'id' in item_data:
+                    # Check if CoreThread passed an error status
+                    if hasattr(event, 'error_message') and event.error_message:
+                        db.update_queue_item_status(item_data['id'], 'error')
+                        item_data['status'] = f"⚠️ Error ({event.error_message})"
+                        print(f"Error processing queue item {item_data['id']}: {event.error_message}")
+                    else:
+                        db.update_queue_item_status(item_data['id'], 'completed')
+                        item_data['status'] = "✅ Completed"
+                else:
+                    print(f"Error: Queue item {item_data.get('book_title')} missing 'id', cannot update DB status.")
+
+            # Try to process the next item
+            self.current_queue_item_index += 1
+            self.process_next_queue_item() # This method will handle actual processing
+        else:
+            # This was a single synthesis, not from queue
+            self.open_folder_with_explorer(self.output_folder_text_ctrl.GetValue())
+            # Re-enable start button and params if it was a single synthesis
+            self.start_button.Enable()
+            self.params_panel.Enable()
+            self.table.EnableCheckBoxes(True)
+
 
     def create_layout(self):
         # Panels layout looks like this:
@@ -339,7 +456,7 @@ class MainWindow(wx.Frame):
 
         def on_select_engine(event, engine_type):
             torch.set_default_device(engine_type)
-            save_user_setting('engine', engine_type)
+            db.save_user_setting('engine', engine_type) # Use db prefix
             print(f"Engine set to {engine_type} and saved.")
 
         self.cpu_radio.Bind(wx.EVT_RADIOBUTTON, lambda event: on_select_engine(event, 'cpu'))
@@ -458,14 +575,14 @@ class MainWindow(wx.Frame):
 
     def on_select_voice(self, event):
         self.selected_voice = event.GetString()
-        save_user_setting('voice', self.selected_voice)
+        db.save_user_setting('voice', self.selected_voice) # Use db prefix
         print(f"Voice set to {self.selected_voice} and saved.")
 
     def on_set_custom_rate(self, event):
         rate_str = event.GetString()
         if not rate_str: # Empty input
             self.custom_rate = None
-            save_user_setting('custom_rate', None)
+            db.save_user_setting('custom_rate', None) # Use db prefix
             print("Custom rate cleared and saved.")
             return
 
@@ -473,7 +590,7 @@ class MainWindow(wx.Frame):
             rate = int(rate_str)
             if rate > 0:
                 self.custom_rate = rate
-                save_user_setting('custom_rate', self.custom_rate)
+                db.save_user_setting('custom_rate', self.custom_rate) # Use db prefix
                 print(f"Custom rate set to {self.custom_rate} and saved.")
             # else: # Negative or zero, could show an error or ignore
             #    print(f"Invalid custom rate (must be positive): {rate_str}")
@@ -503,7 +620,7 @@ class MainWindow(wx.Frame):
             speed = float(speed_str)
             if speed > 0: # Basic validation
                 self.selected_speed = speed
-                save_user_setting('speed', self.selected_speed)
+                db.save_user_setting('speed', self.selected_speed) # Use db prefix
                 print(f'Selected speed {self.selected_speed} and saved.')
             # else: provide feedback for invalid speed if desired
         except ValueError:
@@ -557,36 +674,10 @@ class MainWindow(wx.Frame):
             chapter.short_name = chapter.get_name().replace('.xhtml', '').replace('xhtml/', '').replace('.html', '').replace('Text/', '')
             chapter.is_selected = chapter in self.good_chapters_list # Use instance var for consistency
 
-        # Create left panel and notebook structure
-        self.splitter_left = wx.Panel(self.splitter, -1)
-        self.left_sizer = wx.BoxSizer(wx.VERTICAL)
-        self.splitter_left.SetSizer(self.left_sizer)
+        # Create/ensure notebook and tab structure exists
+        self.create_notebook_and_tabs()
 
-        self.notebook = wx.Notebook(self.splitter_left)
-
-        # Chapters Tab (Page container; content will be ScrolledPanel from create_chapters_table_panel)
-        self.chapters_tab_page = wx.Panel(self.notebook)
-        self.notebook.AddPage(self.chapters_tab_page, "Chapters")
-        # self.chapters_panel (the ScrolledPanel) is created in create_layout_for_ebook and placed in chapters_tab_page
-
-        # Staging Tab Panel (This is the ScrolledPanel itself)
-        self.staging_tab_panel = ScrolledPanel(self.notebook, -1, style=wx.TAB_TRAVERSAL | wx.SUNKEN_BORDER)
-        self.staging_tab_sizer = wx.BoxSizer(wx.VERTICAL)
-        self.staging_tab_panel.SetSizer(self.staging_tab_sizer)
-        self.notebook.AddPage(self.staging_tab_panel, "Staging")
-
-        # Queue Tab Panel (Placeholder)
-        self.queue_tab_panel = wx.Panel(self.notebook)
-        ql = wx.StaticText(self.queue_tab_panel, label="Queue functionality will be implemented here.")
-        qs = wx.BoxSizer(wx.VERTICAL)
-        qs.Add(ql, 0, wx.ALL|wx.CENTER, 10)
-        self.queue_tab_panel.SetSizer(qs)
-        self.notebook.AddPage(self.queue_tab_panel, "Queue")
-
-        self.left_sizer.Add(self.notebook, 1, wx.ALL | wx.EXPAND, 5)
-        self.splitter_sizer.Add(self.splitter_left, 1, wx.ALL | wx.EXPAND, 5)
-
-        # Create right panel and populate chapters tab
+        # Create right panel and populate chapters tab (which is inside the notebook)
         self.create_layout_for_ebook(self.splitter) # self.splitter is the parent for splitter_right
 
         # Update Cover (ensure self.cover_bitmap exists, created in create_right_panel part of create_layout_for_ebook)
@@ -605,9 +696,306 @@ class MainWindow(wx.Frame):
                 self.cover_bitmap.SetBitmap(wx.NullBitmap) # Clear old cover
 
         self.refresh_staging_tab() # Now that staging_tab_panel exists
+        self.refresh_queue_tab() # Initial call to set up the queue tab
 
         self.splitter.Layout() # Layout the main splitter panel
         self.Layout() # Layout the main frame
+
+    def refresh_queue_tab(self):
+        # Clear existing content from the queue_tab_panel's sizer
+        for child in self.queue_tab_sizer.GetChildren():
+            # child.GetWindow().Destroy() # This might be too aggressive if sizer items are not windows
+            self.queue_tab_sizer.Hide(child.GetWindow()) # Hide the window
+            self.queue_tab_sizer.Remove(child.GetWindow()) # Remove from sizer
+            if child.GetWindow():
+                 child.GetWindow().Destroy()
+
+
+        if not self.queue_items:
+            no_items_label = wx.StaticText(self.queue_tab_panel, label="The synthesis queue is empty.")
+            self.queue_tab_sizer.Add(no_items_label, 0, wx.ALL | wx.ALIGN_CENTER, 15)
+        else:
+            for item_idx, item_data in enumerate(self.queue_items):
+                # Main container for each queue item
+                item_box_label = f"#{item_idx + 1}: {item_data['book_title']}"
+                # Add status to the label if present
+                current_status = item_data.get('status', 'Pending')
+                if self.queue_processing_active and item_idx == self.current_queue_item_index:
+                    current_status = item_data.get('status', "⏳ In Progress") # Default to In Progress if it's the current one
+
+                item_display_label = f"{item_box_label} - Status: {current_status}"
+                item_box = wx.StaticBox(self.queue_tab_panel, label=item_display_label)
+                item_sizer = wx.StaticBoxSizer(item_box, wx.VERTICAL)
+
+                # Chapters information
+                chapters_str = "All Chapters" # Default if specific chapters aren't listed (e.g. whole book)
+                if 'chapters' in item_data and isinstance(item_data['chapters'], list):
+                    if len(item_data['chapters']) > 3:
+                        chapters_str = f"Selected chapters ({len(item_data['chapters'])})"
+                    else:
+                        chapters_str = ", ".join([ch['title'] for ch in item_data['chapters']])
+                    if not chapters_str: chapters_str = "No specific chapters selected"
+                elif 'selected_chapter_details' in item_data: # From "Queue Whole Book" (legacy or direct chapter objects)
+                    if len(item_data['selected_chapter_details']) > 3:
+                         chapters_str = f"Selected chapters ({len(item_data['selected_chapter_details'])})"
+                    else:
+                        chapters_str = ", ".join([ch.short_name for ch in item_data['selected_chapter_details']])
+
+
+                chapters_label = wx.StaticText(item_box, label=f"Chapters: {chapters_str}")
+                item_sizer.Add(chapters_label, 0, wx.ALL | wx.EXPAND, 5)
+
+                # Synthesis settings
+                settings = item_data.get('synthesis_settings', {})
+                engine_label = wx.StaticText(item_box, label=f"Engine: {settings.get('engine', 'N/A')}")
+                voice_label = wx.StaticText(item_box, label=f"Voice: {settings.get('voice', 'N/A')}")
+                speed_label = wx.StaticText(item_box, label=f"Speed: {settings.get('speed', 'N/A')}")
+                output_label = wx.StaticText(item_box, label=f"Output: {settings.get('output_folder', 'N/A')}")
+                output_label.Wrap(self.window_width // 3) # Wrap text if too long
+
+                item_sizer.Add(engine_label, 0, wx.ALL | wx.EXPAND, 2)
+                item_sizer.Add(voice_label, 0, wx.ALL | wx.EXPAND, 2)
+                item_sizer.Add(speed_label, 0, wx.ALL | wx.EXPAND, 2)
+                item_sizer.Add(output_label, 0, wx.ALL | wx.EXPAND, 2)
+
+                # Store a reference to the StaticBox in the item_data if needed for updates
+                item_data['_ui_box'] = item_box
+
+                # Add Remove button for each item
+                remove_button = wx.Button(item_box, label="❌ Remove")
+                # Pass queue_item_id (item_data['id']) to the handler
+                # Ensure item_data['id'] exists and is the correct DB ID for the queue item
+                if 'id' in item_data:
+                    remove_button.Bind(wx.EVT_BUTTON, lambda evt, qid=item_data['id']: self.on_remove_queue_item(evt, qid))
+                else:
+                    remove_button.Disable() # Should not happen if items are from DB
+                    print(f"Warning: Queue item '{item_data.get('book_title')}' is missing an 'id'. Remove button disabled.")
+                item_sizer.Add(remove_button, 0, wx.ALL | wx.ALIGN_CENTER, 5)
+
+                self.queue_tab_sizer.Add(item_sizer, 0, wx.ALL | wx.EXPAND, 10)
+
+        # Add "Run Queue" button if items exist
+        if self.queue_items:
+            if not self.run_queue_button: # Create only if it doesn't exist
+                 self.run_queue_button = wx.Button(self.queue_tab_panel, label="🚀 Run Queue")
+                 self.run_queue_button.Bind(wx.EVT_BUTTON, self.on_run_queue)
+
+            # Ensure button is added to sizer if not already (e.g. after being removed)
+            # Check if the button is already managed by a sizer and if that sizer is self.queue_tab_sizer
+            button_already_in_correct_sizer = False
+            if self.run_queue_button.GetContainingSizer() == self.queue_tab_sizer:
+                button_already_in_correct_sizer = True
+
+            if not button_already_in_correct_sizer:
+                 # If it's in another sizer or no sizer, remove it first if necessary before adding
+                 # This check might be too simple if button could be in a sub-sizer of queue_tab_sizer
+                 if self.run_queue_button.GetContainingSizer():
+                     self.run_queue_button.GetContainingSizer().Detach(self.run_queue_button)
+                 self.queue_tab_sizer.Add(self.run_queue_button, 0, wx.ALL | wx.ALIGN_CENTER, 10)
+
+            self.run_queue_button.Enable(not self.queue_processing_active)
+            self.run_queue_button.Show(True) # Ensure it's visible
+        elif self.run_queue_button: # No items, but button exists
+            self.run_queue_button.Show(False) # Hide if no items
+            if self.run_queue_button.GetContainingSizer() == self.queue_tab_sizer:
+                 self.queue_tab_sizer.Detach(self.run_queue_button)
+            # Optionally destroy: self.run_queue_button.Destroy(); self.run_queue_button = None
+
+        self.queue_tab_panel.SetupScrolling()
+        self.queue_tab_panel.Layout()
+        # self.Layout() # Avoid full frame layout if possible, let parent sizers handle it.
+
+    def on_run_queue(self, event):
+        if not self.queue_items:
+            wx.MessageBox("Queue is empty. Add items to the queue first.", "Queue Empty", wx.OK | wx.ICON_INFORMATION)
+            return
+
+        if self.queue_processing_active:
+            wx.MessageBox("Queue processing is already active.", "Queue Running", wx.OK | wx.ICON_INFORMATION)
+            return
+
+        self.queue_processing_active = True
+        self.current_queue_item_index = 0 # Start with the first item
+        # self.queue_to_process = list(self.queue_items) # Process a copy
+
+        if self.run_queue_button:
+            self.run_queue_button.Disable()
+
+        self.start_button.Disable() # Disable single start button as well
+        self.params_panel.Disable() # Disable params panel
+
+        self.process_next_queue_item()
+
+    def process_next_queue_item(self):
+        if not self.queue_processing_active: # Stopped externally
+            self._finalize_queue_processing()
+            return
+
+        if self.current_queue_item_index >= len(self.queue_items):
+            wx.MessageBox("All items in the queue have been processed.", "Queue Finished", wx.OK | wx.ICON_INFORMATION)
+            self._finalize_queue_processing()
+            return
+
+        item_to_process = self.queue_items[self.current_queue_item_index]
+        # Update DB status and local status
+        db.update_queue_item_status(item_to_process['id'], 'in_progress')
+        item_to_process['status'] = "⏳ In Progress"
+        self.refresh_queue_tab()
+
+        book_title = item_to_process['book_title']
+        # synthesis_settings is already a dict due to db.get_queued_items()
+        synthesis_settings = item_to_process['synthesis_settings']
+        chapters_to_synthesize = []
+
+        # Prepare chapters for CoreThread: ensure they have 'extracted_text' and 'chapter_index'
+        # item_to_process['chapters'] comes from db.get_queued_items which gets from queued_chapters table
+        for idx, chap_db_info in enumerate(item_to_process.get('chapters', [])):
+            chapter_obj = type('ChapterForCore', (), {})()
+            chapter_obj.title = chap_db_info.get('title', 'Unknown Chapter')
+            chapter_obj.short_name = chap_db_info.get('title', 'Unknown Chapter') # For consistency if core uses short_name
+            chapter_obj.chapter_index = idx # Index within this synthesis job for UI event
+
+            text_content = chap_db_info.get('text_content')
+            # If text_content is None or empty, and there's a staged_chapter_id, try fetching it
+            if not text_content and chap_db_info.get('staged_chapter_id'):
+                print(f"Fetching text for staged chapter ID {chap_db_info['staged_chapter_id']} ('{chapter_obj.title}')...")
+                text_content = db.get_chapter_text_content(chap_db_info['staged_chapter_id'])
+
+            if text_content is None: # If still None after trying to fetch
+                print(f"Error: Could not find/fetch text for chapter ID {chap_db_info.get('id')} ('{chapter_obj.title}') in book '{book_title}'. Skipping chapter.")
+                # Optionally mark chapter or item as error here. For now, just skip this chapter.
+                continue
+            chapter_obj.extracted_text = text_content
+            chapter_obj.is_selected = True # All chapters here are for processing
+            chapters_to_synthesize.append(chapter_obj)
+
+        if not chapters_to_synthesize:
+            print(f"Skipping '{book_title}': No valid chapters to synthesize after attempting to load text.")
+            db.update_queue_item_status(item_to_process['id'], 'error') # Mark as error in DB
+            item_to_process['status'] = "⚠️ Error (No Chapters Text)" # Update local status
+            self.refresh_queue_tab() # Refresh UI
+            self.current_queue_item_index += 1 # Move to next item
+            wx.CallAfter(self.process_next_queue_item) # Try next item
+            return
+
+        # Prepare parameters for CoreThread
+        file_path = item_to_process.get('source_path') # Available if from "Chapters" tab
+
+        if not file_path and 'book_id' in item_to_process: # Staged item
+            # Attempt to use current book's path as a fallback for core.main's epub.read_epub.
+            # This is primarily so core.main doesn't crash trying to read a non-existent/placeholder path.
+            # The actual chapter content for TTS comes from chapters_to_synthesize.
+            # Metadata (title, author, cover) in the output file might be from the wrong book if it's not a match.
+            # This will be properly fixed when DB stores source_path or metadata for staged items.
+            if hasattr(self, 'selected_file_path') and self.selected_file_path and Path(self.selected_file_path).exists():
+                file_path = self.selected_file_path
+                print(f"Warning: Using currently loaded EPUB '{file_path}' as a source for metadata for staged item '{book_title}'. Output metadata may be incorrect if this is not the original EPUB for the staged item.")
+            else:
+                # If no current EPUB is loaded, core.main will likely fail.
+                # This is an unrecoverable situation for core.main as it's currently written.
+                print(f"Error: Cannot process staged item '{book_title}'. Original source_path is missing and no fallback EPUB is currently loaded. Skipping.")
+                item_to_process['status'] = "⚠️ Error (Missing EPUB Path)"
+                self.current_queue_item_index +=1
+                # self.synthesis_in_progress = False # Reset as this item won't run CoreThread
+                wx.CallAfter(self.process_next_queue_item)
+                return
+        elif not file_path: # Should not happen if logic is correct (source_path from Chapters tab)
+             print(f"Error: file_path is missing for item '{book_title}' and it's not a staged item. Skipping.")
+             item_to_process['status'] = "⚠️ Error (Missing Path)"
+             self.current_queue_item_index +=1
+             wx.CallAfter(self.process_next_queue_item)
+             return
+
+
+        voice_flagged = synthesis_settings.get('voice', self.voice_dropdown.GetValue())
+        voice = voice_flagged.split(' ')[1] if ' ' in voice_flagged else voice_flagged # Remove flag
+
+        try:
+            speed = float(synthesis_settings.get('speed', self.speed_text_input.GetValue()))
+        except ValueError:
+            speed = 1.0
+
+        output_folder = synthesis_settings.get('output_folder', self.output_folder_text_ctrl.GetValue())
+        engine = synthesis_settings.get('engine', 'cpu')
+
+        # Set device for this specific core.main call
+        torch.set_default_device(engine)
+        print(f"Setting engine to: {engine} for book: {book_title}")
+
+
+        if not chapters_to_synthesize:
+             print(f"No chapters to synthesize for '{book_title}'. Skipping.")
+             item_to_process['status'] = "⚠️ Skipped (No Chapters)"
+             self.current_queue_item_index +=1
+             wx.CallAfter(self.process_next_queue_item)
+             return
+
+        print(f"Starting synthesis from queue for: {book_title} with {len(chapters_to_synthesize)} chapters.")
+        self.synthesis_in_progress = True # General flag for core processing
+
+        # Ensure UI elements like progress bar are visible for the current item
+        self.progress_bar_label.SetLabel(f"Progress for: {book_title}")
+        self.progress_bar_label.Show()
+        self.progress_bar.SetValue(0)
+        self.progress_bar.Show()
+        self.eta_label.Show()
+        self.synth_panel.Layout()
+
+
+        # Note: CoreThread's post_event uses chapter.chapter_index.
+        # Make sure chapters_to_synthesize have this attribute.
+        self.core_thread = CoreThread(params=dict(
+            file_path=file_path,  # This might be problematic if not correctly resolved
+            voice=voice,
+            pick_manually=False,
+            speed=speed,
+            output_folder=output_folder,
+            selected_chapters=chapters_to_synthesize,
+            # We can add a queue_item_id or book_title to params if CoreThread needs to report it back
+            # This would help on_core_finished identify which queue item finished if events become complex.
+            # For sequential processing, self.current_queue_item_index is enough for MainWindow.
+            # We also need to ensure chapter_index attribute is on each chapter object for progress.
+            # For chapters from staging, we added a dummy one.
+        ))
+        self.core_thread.start()
+        # The actual removal from self.queue_items and moving to next happens in on_core_finished
+
+    def _finalize_queue_processing(self):
+        self.queue_processing_active = False
+        self.synthesis_in_progress = False # Reset general flag
+        self.current_queue_item_index = -1
+        # self.queue_to_process = [] # Clear the processing copy
+
+        # Remove items from DB that were successfully processed or errored out
+        items_to_remove_from_db = [
+            item['id'] for item in self.queue_items
+            if 'id' in item and (item.get('status', '').startswith("✅") or \
+                                 item.get('status', '').startswith("⚠️"))
+        ]
+        for item_id_to_remove in items_to_remove_from_db:
+            db.remove_queue_item(item_id_to_remove)
+
+        self.queue_items = db.get_queued_items() # Reload to get the current truth from DB
+        self.refresh_queue_tab()
+
+        # Re-enable global controls if no more items or queue stopped
+        self.start_button.Enable()
+        self.params_panel.Enable()
+        if hasattr(self, 'table'): self.table.EnableCheckBoxes(True)
+
+        if self.run_queue_button:
+            if self.queue_items: # If some items remain (e.g. user added more)
+                self.run_queue_button.Enable()
+            else: # Queue is now empty
+                self.run_queue_button.Disable() # Or remove, handled by refresh_queue_tab
+
+        # Hide progress bar elements related to single/queue item processing
+        self.progress_bar_label.Hide()
+        self.progress_bar.Hide()
+        self.eta_label.Hide()
+        self.params_panel.Layout() # Was disabled
+        self.synth_panel.Layout()
+
 
     def on_table_checked(self, event):
         self.document_chapters[event.GetIndex()].is_selected = True
@@ -659,9 +1047,73 @@ class MainWindow(wx.Frame):
 
         stage_book_button = wx.Button(panel, label="📚 Stage Book for Batching")
         stage_book_button.Bind(wx.EVT_BUTTON, self.on_stage_book)
-        sizer.Add(stage_book_button, 0, wx.ALL | wx.ALIGN_CENTER, 10)
+        sizer.Add(stage_book_button, 0, wx.ALL | wx.ALIGN_CENTER, 5)
+
+        queue_portions_button = wx.Button(panel, label="▶️ Queue Selected Book Portions")
+        queue_portions_button.Bind(wx.EVT_BUTTON, self.on_queue_selected_book_portions)
+        sizer.Add(queue_portions_button, 0, wx.ALL | wx.ALIGN_CENTER, 10)
 
         return panel
+
+    def on_queue_selected_book_portions(self, event):
+        if not hasattr(self, 'selected_book') or not self.selected_book:
+            wx.MessageBox("Please open an EPUB file first to select and queue book portions.",
+                          "No Book Loaded", wx.OK | wx.ICON_INFORMATION)
+            return
+
+        selected_chapters_from_table = []
+        for i in range(self.table.GetItemCount()):
+            if self.table.IsItemChecked(i):
+                # self.document_chapters[i] should correspond to the displayed item
+                selected_chapters_from_table.append(self.document_chapters[i])
+
+        if not selected_chapters_from_table:
+            wx.MessageBox("No chapters selected from the list. Please check the chapters you want to queue.",
+                          "No Selection", wx.OK | wx.ICON_INFORMATION)
+            return
+
+        # Retrieve current global synthesis settings
+        current_engine = 'cuda' if self.cuda_radio.GetValue() else 'cpu'
+        current_voice = self.voice_dropdown.GetValue() # This includes the flag
+        current_speed = self.speed_text_input.GetValue()
+        current_output_folder = self.output_folder_text_ctrl.GetValue()
+
+        synthesis_settings = {
+            'engine': current_engine,
+            'voice': current_voice,
+            'speed': current_speed,
+            'output_folder': current_output_folder,
+        }
+
+        # Create a new queue entry
+        # Note: 'selected_chapter_details' stores the actual chapter objects from self.document_chapters
+        # This is different from the Staging tab queue which stores DB IDs and titles.
+        # The processor will need to handle this difference.
+        queue_entry = {
+            'staged_book_id': None, # Not from staging
+            'book_title': self.selected_book_title,
+            'source_path': self.selected_file_path,
+            'synthesis_settings': synthesis_settings, # This is a dict
+            'chapters': []
+        }
+        for i, chap_obj in enumerate(selected_chapters_from_table):
+            db_queue_details['chapters'].append({
+                'staged_chapter_id': None,
+                'title': chap_obj.short_name,
+                'text_content': chap_obj.extracted_text, # Store text directly for non-staged items
+                'order': i
+            })
+
+        new_item_id = db.add_item_to_queue(db_queue_details)
+        if new_item_id:
+            self.queue_items = db.get_queued_items() # Reload queue
+            self.refresh_queue_tab()
+            self.notebook.SetSelection(self.notebook.GetPageCount() - 1)
+            wx.MessageBox(f"Added selected portions from '{self.selected_book_title}' (with {len(selected_chapters_from_table)} chapter(s)) to the queue.",
+                          "Added to Queue", wx.OK | wx.ICON_INFORMATION)
+        else:
+            wx.MessageBox("Failed to add item to the database queue.", "Error", wx.OK | wx.ICON_ERROR)
+
 
     def on_stage_book(self, event):
         if not hasattr(self, 'selected_book') or not self.selected_book:
@@ -756,6 +1208,11 @@ class MainWindow(wx.Frame):
                     no_chapters_label = wx.StaticText(book_box, label="This book has no chapters.")
                     book_sizer.Add(no_chapters_label, 0, wx.ALL, 5)
 
+                # Add "Queue Selected Chapters" button for this book
+                queue_selected_button = wx.Button(book_box, label="▶️ Queue Selected Chapters")
+                queue_selected_button.Bind(wx.EVT_BUTTON, lambda evt, b_id=book['id'], b_title=book['title'], list_ctrl=chapters_list_ctrl: self.on_queue_selected_staged_chapters(evt, b_id, b_title, list_ctrl))
+                book_sizer.Add(queue_selected_button, 0, wx.ALL | wx.ALIGN_CENTER, 10)
+
                 self.staging_tab_sizer.Add(book_sizer, 0, wx.ALL | wx.EXPAND, 10)
 
         self.staging_tab_panel.SetupScrolling()
@@ -763,6 +1220,72 @@ class MainWindow(wx.Frame):
         # self.Layout() # Main frame layout, might be too broad, staging_tab_panel.Layout() should suffice.
         self.splitter.Layout() # Layout the main splitter that contains left and right
         self.Layout() # Full frame layout might be needed if sizers changed overall frame size.
+
+    def on_queue_selected_staged_chapters(self, event, book_id, book_title, chapters_list_ctrl):
+        selected_chapters_for_queue = []
+        if not chapters_list_ctrl: # Should not happen if button is present
+            wx.MessageBox("Error: Chapter list not found for this book.", "Error", wx.OK | wx.ICON_ERROR)
+            return
+
+        for i in range(chapters_list_ctrl.GetItemCount()):
+            if chapters_list_ctrl.IsItemChecked(i):
+                chapter_id_in_db = chapters_list_ctrl.GetItemData(i) # This is the DB ID of the chapter
+                chapter_title = chapters_list_ctrl.GetItem(i, 1).GetText()
+                # We need to fetch the actual chapter content or rely on processor to do so using chapter_id_in_db
+                # For now, just storing title and ID. The core logic will need to handle fetching by ID.
+                selected_chapters_for_queue.append({
+                    'id': chapter_id_in_db, # db id
+                    'title': chapter_title,
+                    # Fetch text content for each chapter to be stored in queued_chapters
+                    text = db.get_chapter_text_content(chapter_id_in_db)
+                    if text is None:
+                        # Log warning, but allow queuing. process_next_queue_item will try to re-fetch.
+                        print(f"Warning: Could not fetch text for staged chapter ID {chapter_id_in_db} ('{chapter_title}') during queuing. Will attempt fetch during processing.")
+
+                    chapters_for_db.append({
+                        'staged_chapter_id': chapter_id_in_db,
+                        'title': chapter_title,
+                        'text_content': text, # Store fetched text (might be None if fetch failed)
+                        'order': current_chapter_order_in_item
+                    })
+                    current_chapter_order_in_item +=1
+
+        if not chapters_for_db:
+            wx.MessageBox("No chapters selected. Please check the selection.",
+                          "No Selection", wx.OK | wx.ICON_INFORMATION)
+            return
+
+        # Retrieve current global synthesis settings
+        current_engine = 'cuda' if self.cuda_radio.GetValue() else 'cpu'
+        current_voice = self.voice_dropdown.GetValue()
+        current_speed = self.speed_text_input.GetValue()
+        current_output_folder = self.output_folder_text_ctrl.GetValue()
+
+        synthesis_settings = { # This is a dict
+            'engine': current_engine,
+            'voice': current_voice,
+            'speed': current_speed,
+            'output_folder': current_output_folder,
+        }
+
+        db_queue_details = {
+            'staged_book_id': book_id,
+            'book_title': book_title,
+            'source_path': None, # Staged items don't have a direct source_path for the queue item itself
+            'synthesis_settings': synthesis_settings,
+            'chapters': chapters_for_db
+        }
+
+        new_item_id = db.add_item_to_queue(db_queue_details)
+        if new_item_id:
+            self.queue_items = db.get_queued_items() # Reload queue
+            self.refresh_queue_tab()
+            self.notebook.SetSelection(self.notebook.GetPageCount() - 1)
+            wx.MessageBox(f"Added '{book_title}' (with {len(chapters_for_db)} selected chapter(s)) to the queue.",
+                          "Added to Queue", wx.OK | wx.ICON_INFORMATION)
+        else:
+            wx.MessageBox("Failed to add item to the database queue.", "Error", wx.OK | wx.ICON_ERROR)
+
 
     def get_selected_voice(self):
         return self.selected_voice.split(' ')[1]
