@@ -703,28 +703,21 @@ class MainWindow(wx.Frame):
 
     def refresh_queue_tab(self):
         # Clear existing content from the queue_tab_panel's sizer
-        # DeleteWindows will destroy all windows owned by the sizer and clear the sizer.
-        # This is generally the safest way to clear a sizer that will be repopulated.
         if hasattr(self, 'queue_tab_sizer') and self.queue_tab_sizer:
-            self.queue_tab_sizer.DeleteWindows()
-            # After DeleteWindows, the sizer is empty.
-            # If the run_queue_button was managed by this sizer, it's now destroyed.
-            # It will be recreated if needed later in this method.
-            # We need to ensure self.run_queue_button itself is None so it can be recreated.
-            # However, the current logic checks `if not self.run_queue_button:` before creating it,
-            # and if it exists but is not in the sizer, it's re-added.
-            # If DeleteWindows destroys it, self.run_queue_button might become a stale reference.
-            # Best to set it to None after its destruction if it was part of this sizer.
-            # For simplicity and given the recreation logic, let's assume it will be handled.
-            # A more explicit handling would be to check if self.run_queue_button exists and Destroy it
-            # before calling DeleteWindows, then set self.run_queue_button = None.
-            # Or, if self.run_queue_button is meant to persist and be re-added, it should be
-            # Detached before DeleteWindows.
-
-            # Current logic for run_queue_button:
-            # 1. If not self.run_queue_button: create it. (This will happen if it was destroyed)
-            # 2. If it exists and not in correct sizer: detach and re-add.
-            # This seems robust enough.
+            # Clear the sizer and delete all windows it managed.
+            # This is the most common and robust way to reset a sizer's content.
+            self.queue_tab_sizer.Clear(delete_windows=True)
+            # Any windows previously in the sizer (like individual queue item boxes,
+            # the 'empty queue' text, or the run_queue_button if it was part of it)
+            # are now destroyed. They will be recreated as needed below.
+            # If self.run_queue_button was a child and was part of this sizer,
+            # it is now destroyed, and self.run_queue_button would be a stale reference.
+            # The existing logic for creating/showing the button later in this method
+            # (e.g., `if not self.run_queue_button:`) should ideally handle
+            # the recreation if self.run_queue_button becomes None or if operations on a stale
+            # reference lead to expected errors that are gracefully handled.
+            # For now, we rely on Clear() to do its job and the subsequent button logic
+            # to correctly reconstruct or re-add the button.
 
         if not self.queue_items:
             no_items_label = wx.StaticText(self.queue_tab_panel, label="The synthesis queue is empty.")
