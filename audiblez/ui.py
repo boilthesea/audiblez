@@ -843,6 +843,11 @@ class MainWindow(wx.Frame):
 
         self.queue_tab_panel.SetupScrolling()
         self.queue_tab_panel.Layout()
+        if hasattr(self, 'notebook') and self.notebook:
+            self.notebook.Layout()
+        if hasattr(self, 'splitter_left') and self.splitter_left:
+            self.splitter_left.Layout()
+        # self.Layout() # Optionally, layout the whole frame if needed
 
     def update_scheduled_time_display(self):
         if not hasattr(self, 'scheduled_time_text') or not self.scheduled_time_text:
