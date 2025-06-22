@@ -29,7 +29,8 @@ def create_tables(conn: sqlite3.Connection):
             engine TEXT,
             voice TEXT,
             speed REAL,
-            custom_rate INTEGER
+            custom_rate INTEGER,
+            next_scheduled_run INTEGER -- Stores Unix timestamp for next schedule
         )
     """)
 
@@ -112,23 +113,17 @@ def save_user_setting(setting_name: str, setting_value):
         cursor.execute("SELECT id FROM user_settings WHERE id = 1")
         row = cursor.fetchone()
 
+            valid_columns = ["engine", "voice", "speed", "custom_rate", "next_scheduled_run"]
+            if setting_name not in valid_columns:
+                print(f"Error: Invalid setting_name '{setting_name}' for update/insert.")
+                return # Or raise an error
+
         if row:
             # Update existing row
-            # Ensure setting_name is a valid column to prevent SQL injection if not already validated
-            valid_columns = ["engine", "voice", "speed", "custom_rate"]
-            if setting_name not in valid_columns:
-                print(f"Error: Invalid setting_name '{setting_name}' for update.")
-                return # Or raise an error
             cursor.execute(f"UPDATE user_settings SET {setting_name} = ? WHERE id = 1", (setting_value,))
         else:
             # Insert new row with id = 1
-            valid_columns = ["engine", "voice", "speed", "custom_rate"]
-            if setting_name not in valid_columns:
-                print(f"Error: Invalid setting_name '{setting_name}' for insert.")
-                return # Or raise an error
-
             # Initialize all column values, setting the specified one and others to NULL
-            # The 'id' column is explicitly set to 1.
             column_names_for_insert = ["id"] + valid_columns
             value_placeholders = ["?"] * len(column_names_for_insert)
 
@@ -161,26 +156,19 @@ def load_user_setting(setting_name: str):
     conn = connect_db()
     cursor = conn.cursor()
     try:
-        # Ensure setting_name is a valid column to prevent SQL injection if not already validated
-        valid_columns = ["engine", "voice", "speed", "custom_rate", "id"] # id is not usually loaded this way, but good for validation
+        valid_columns = ["engine", "voice", "speed", "custom_rate", "next_scheduled_run", "id"] # id for validation
         if setting_name not in valid_columns:
             print(f"Error: Invalid setting_name '{setting_name}' for load.")
-            # Depending on desired strictness, could return None or raise error
-            # For now, let's prevent arbitrary column querying if it's not a known setting
-            # However, the original spec was to just try and load it.
-            # Reverting to less strict validation here but keeping the f-string for SELECT dynamic.
-            # Consider preparing statements if setting_name could come from untrusted input outside this controlled scope.
-            pass # Let it try, and SQLite will error if column doesn't exist.
+            # Pass to let SQLite handle "no such column" if it's truly an invalid/new column
+            # vs. a typo in a known one. UI/logic should ensure only valid names are passed.
+            pass
 
-        # Assuming settings are in a single row with id = 1
-        # Dynamically constructing column name in SELECT is generally safe if setting_name is from a controlled list.
         cursor.execute(f"SELECT {setting_name} FROM user_settings WHERE id = 1")
         row = cursor.fetchone()
         if row:
             return row[0]
         return None
     except sqlite3.Error as e:
-        # More specific error if column doesn't exist: e.g., "no such column: {setting_name}"
         print(f"Database error in load_user_setting for '{setting_name}': {e}")
         return None
     finally:
@@ -198,7 +186,7 @@ def load_all_user_settings() -> dict:
     settings = {}
     try:
         # Assuming settings are in a single row with id = 1
-        cursor.execute("SELECT engine, voice, speed, custom_rate FROM user_settings WHERE id = 1")
+        cursor.execute("SELECT engine, voice, speed, custom_rate, next_scheduled_run FROM user_settings WHERE id = 1")
         row = cursor.fetchone()
         if row:
             settings = {
@@ -206,6 +194,7 @@ def load_all_user_settings() -> dict:
                 "voice": row[1],
                 "speed": row[2],
                 "custom_rate": row[3],
+                "next_scheduled_run": row[4],
             }
         return settings
     except sqlite3.Error as e:
@@ -350,6 +339,17 @@ def update_staged_book_final_compilation(book_id: int, final_compilation: bool):
         print(f"Database error in update_staged_book_final_compilation: {e}")
     finally:
         conn.close()
+
+def save_schedule_time(timestamp: int | None):
+    """Saves the next scheduled run time (Unix timestamp) to user settings.
+       Pass None to clear the schedule."""
+    save_user_setting('next_scheduled_run', timestamp)
+
+def load_schedule_time() -> int | None:
+    """Loads the next scheduled run time (Unix timestamp) from user settings.
+       Returns None if not set or error."""
+    return load_user_setting('next_scheduled_run')
+
 
 # --- Queue Management Functions ---
 import json
@@ -530,6 +530,18 @@ def remove_queue_item(queue_item_id: int):
         conn.commit()
     except sqlite3.Error as e:
         print(f"Database error in remove_queue_item: {e}")
+    finally:
+        conn.close()
+
+def update_staged_chapter_status_in_db(staged_chapter_id: int, status: str):
+    """Updates the status of a specific staged chapter."""
+    conn = connect_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("UPDATE staged_chapters SET status = ? WHERE id = ?", (status, staged_chapter_id))
+        conn.commit()
+    except sqlite3.Error as e:
+        print(f"Database error in update_staged_chapter_status_in_db: {e}")
     finally:
         conn.close()
 

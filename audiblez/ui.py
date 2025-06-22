@@ -11,6 +11,8 @@ import subprocess
 import io
 import os
 import wx
+import wx.adv # For DatePickerCtrl, TimePickerCtrl
+from datetime import datetime, time as dt_time # For schedule dialog
 from wx.lib.newevent import NewEvent
 from wx.lib.scrolledpanel import ScrolledPanel
 from PIL import Image
@@ -68,6 +70,8 @@ class MainWindow(wx.Frame):
         self.queue_processing_active = False
         self.current_queue_item_index = -1 # To track which item in self.queue_items is being processed
         self.run_queue_button = None # To enable/disable run queue button
+        self.schedule_queue_button = None # For scheduling
+        self.scheduled_time_text = None # To display scheduled time
 
         # Load queue from database on startup
         self.queue_items = db.get_queued_items()
@@ -79,9 +83,24 @@ class MainWindow(wx.Frame):
         self.create_notebook_and_tabs()
         wx.CallAfter(self._initial_ui_refresh) # Refresh tabs after UI is fully up
 
+        # Initialize and start schedule checker
+        self.schedule_check_timer = wx.Timer(self)
+        self.Bind(wx.EVT_TIMER, self.on_check_schedule_timer, self.schedule_check_timer)
+        self.start_schedule_check_timer()
+
+        # Bind close event to stop timer
+        self.Bind(wx.EVT_CLOSE, self.on_close_window)
+
         default_epub_path = Path('../epub/lewis.epub')
         if default_epub_path.exists():
             wx.CallAfter(self.open_epub, str(default_epub_path))
+
+
+    def on_close_window(self, event):
+        if self.schedule_check_timer.IsRunning():
+            self.schedule_check_timer.Stop()
+        # Add any other cleanup needed before closing
+        self.Destroy() # Proceed with closing
 
 
     def _initial_ui_refresh(self):
@@ -214,6 +233,16 @@ class MainWindow(wx.Frame):
                     else:
                         db.update_queue_item_status(item_data['id'], 'completed')
                         item_data['status'] = "✅ Completed"
+
+                        # If completed, update status of staged chapters in DB and refresh staging UI
+                        processed_staged_chapter_ids = []
+                        for chap_info in item_data.get('chapters', []):
+                            staged_chapter_id = chap_info.get('staged_chapter_id')
+                            if staged_chapter_id:
+                                db.update_staged_chapter_status_in_db(staged_chapter_id, 'completed')
+                                processed_staged_chapter_ids.append(staged_chapter_id)
+                        if processed_staged_chapter_ids:
+                            self.update_staging_tab_for_processed_chapters(processed_staged_chapter_ids)
                 else:
                     print(f"Error: Queue item {item_data.get('book_title')} missing 'id', cannot update DB status.")
 
@@ -809,9 +838,200 @@ class MainWindow(wx.Frame):
                  self.queue_tab_sizer.Detach(self.run_queue_button)
             # Optionally destroy: self.run_queue_button.Destroy(); self.run_queue_button = None
 
+        # Sizer for action buttons (Run, Schedule) and scheduled time text
+        action_controls_sizer = wx.BoxSizer(wx.HORIZONTAL)
+
+        if self.queue_items:
+            # Run Queue Button (ensure it's managed by action_controls_sizer now)
+            if self.run_queue_button: # Should exist if there are items
+                if self.run_queue_button.GetContainingSizer() and self.run_queue_button.GetContainingSizer() != action_controls_sizer:
+                    self.run_queue_button.GetContainingSizer().Detach(self.run_queue_button)
+                if not self.run_queue_button.GetContainingSizer():
+                    action_controls_sizer.Add(self.run_queue_button, 0, wx.ALL | wx.ALIGN_CENTER, 5)
+                # State (Enable/Show) of run_queue_button is managed where it's created/updated based on queue_items presence
+
+            # Schedule Queue Button
+            if not self.schedule_queue_button:
+                self.schedule_queue_button = wx.Button(self.queue_tab_panel, label="📅 Schedule Queue")
+                self.schedule_queue_button.Bind(wx.EVT_BUTTON, self.on_schedule_queue)
+
+            if self.schedule_queue_button.GetContainingSizer() != action_controls_sizer:
+                 if self.schedule_queue_button.GetContainingSizer():
+                     self.schedule_queue_button.GetContainingSizer().Detach(self.schedule_queue_button)
+                 action_controls_sizer.Add(self.schedule_queue_button, 0, wx.ALL | wx.ALIGN_CENTER, 5)
+            self.schedule_queue_button.Enable(not self.queue_processing_active)
+            self.schedule_queue_button.Show(True)
+
+            # Scheduled Time Display
+            if not self.scheduled_time_text:
+                self.scheduled_time_text = wx.StaticText(self.queue_tab_panel, label="")
+
+            if self.scheduled_time_text.GetContainingSizer() != action_controls_sizer:
+                if self.scheduled_time_text.GetContainingSizer():
+                    self.scheduled_time_text.GetContainingSizer().Detach(self.scheduled_time_text)
+                action_controls_sizer.Add(self.scheduled_time_text, 0, wx.ALL | wx.ALIGN_CENTER | wx.LEFT, 10)
+            self.update_scheduled_time_display()
+            self.scheduled_time_text.Show(True)
+
+            if action_controls_sizer.GetItemCount() > 0:
+                 # Check if action_controls_sizer is already in queue_tab_sizer to avoid adding multiple times
+                 is_present = False
+                 for item in self.queue_tab_sizer.GetChildren():
+                     if item.GetSizer() == action_controls_sizer:
+                         is_present = True
+                         break
+                 if not is_present:
+                    self.queue_tab_sizer.Add(action_controls_sizer, 0, wx.ALL | wx.ALIGN_CENTER, 5)
+
+        else: # No items in queue
+            if self.run_queue_button and self.run_queue_button.IsShown():
+                 if self.run_queue_button.GetContainingSizer(): self.run_queue_button.GetContainingSizer().Detach(self.run_queue_button)
+                 self.run_queue_button.Show(False) # Hide if no items
+            if self.schedule_queue_button and self.schedule_queue_button.IsShown():
+                if self.schedule_queue_button.GetContainingSizer(): self.schedule_queue_button.GetContainingSizer().Detach(self.schedule_queue_button)
+                self.schedule_queue_button.Show(False)
+            if self.scheduled_time_text and self.scheduled_time_text.IsShown():
+                if self.scheduled_time_text.GetContainingSizer(): self.scheduled_time_text.GetContainingSizer().Detach(self.scheduled_time_text)
+                self.scheduled_time_text.Show(False)
+
+            # If action_controls_sizer is part of queue_tab_sizer and now empty, try to remove it.
+            # This logic can be tricky if other items are in action_controls_sizer.
+            # For now, detaching individual items is safer. If action_controls_sizer itself should be removed:
+            is_present = False
+            for item in self.queue_tab_sizer.GetChildren():
+                if item.GetSizer() == action_controls_sizer:
+                    is_present = True
+                    break
+            if is_present and action_controls_sizer.GetItemCount() == 0 :
+                self.queue_tab_sizer.Detach(action_controls_sizer) # Detach sizer itself
+                # action_controls_sizer.Clear(delete_windows=True) # Optionally clear it if it's not going to be reused immediately
+
         self.queue_tab_panel.SetupScrolling()
         self.queue_tab_panel.Layout()
         # self.Layout() # Avoid full frame layout if possible, let parent sizers handle it.
+
+    def update_scheduled_time_display(self):
+        if not hasattr(self, 'scheduled_time_text') or not self.scheduled_time_text:
+            return
+        scheduled_ts = db.load_schedule_time()
+        if scheduled_ts:
+            try:
+                if scheduled_ts > 0: # Valid timestamp
+                    scheduled_dt = datetime.fromtimestamp(scheduled_ts)
+                    self.scheduled_time_text.SetLabel(f"Scheduled for: {scheduled_dt.strftime('%Y-%m-%d %H:%M')}")
+                else: # Invalid or cleared timestamp
+                    self.scheduled_time_text.SetLabel("Not scheduled")
+            except (TypeError, ValueError, OSError) as e: # Catch potential errors from invalid timestamp
+                self.scheduled_time_text.SetLabel("Scheduled: (Error)")
+                print(f"Error formatting scheduled time (ts: {scheduled_ts}): {e}")
+        else:
+            self.scheduled_time_text.SetLabel("Not scheduled")
+
+        if self.scheduled_time_text.GetContainingSizer():
+            self.scheduled_time_text.GetContainingSizer().Layout()
+        # self.queue_tab_panel.Layout() # Avoid if too broad, parent sizer should handle
+
+    def on_schedule_queue(self, event):
+        dialog = ScheduleDialog(self)
+        if dialog.ShowModal() == wx.ID_OK:
+            selected_datetime = dialog.get_selected_datetime()
+            if selected_datetime: # A specific datetime was chosen
+                if selected_datetime < datetime.now():
+                    wx.MessageBox("Scheduled time must be in the future.", "Invalid Time", wx.OK | wx.ICON_ERROR)
+                    dialog.Destroy()
+                    return
+
+                timestamp = int(selected_datetime.timestamp())
+                db.save_schedule_time(timestamp)
+                wx.MessageBox(f"Queue scheduled to run at: {selected_datetime.strftime('%Y-%m-%d %H:%M')}",
+                              "Queue Scheduled", wx.OK | wx.ICON_INFORMATION)
+                # self.start_schedule_check_timer() # Call to start timer will be added later
+            else: # User explicitly cleared the schedule via the dialog
+                db.save_schedule_time(None) # Pass None to clear
+                wx.MessageBox("Queue schedule has been cleared.", "Schedule Cleared", wx.OK | wx.ICON_INFORMATION)
+                # if hasattr(self, 'schedule_check_timer') and self.schedule_check_timer.IsRunning():
+                #     self.schedule_check_timer.Stop()
+                #     print("Schedule check timer stopped.")
+            self.update_scheduled_time_display() # Update display after any change
+        dialog.Destroy()
+
+    def start_schedule_check_timer(self, interval_ms=30000): # Check every 30 seconds
+        """Starts or restarts the schedule check timer."""
+        if self.schedule_check_timer.IsRunning():
+            self.schedule_check_timer.Stop()
+
+        # Only start if there's actually a schedule to check or if we want it always running
+        # For now, let's make it always start and on_check_schedule_timer can decide to do nothing
+        print(f"Schedule check timer started/restarted (interval: {interval_ms}ms).")
+        self.schedule_check_timer.Start(interval_ms)
+
+
+    def on_check_schedule_timer(self, event):
+        # print("Checking schedule...") # For debugging
+        if self.queue_processing_active:
+            # print("Queue is busy, skipping scheduled check.")
+            return
+
+        scheduled_ts = db.load_schedule_time()
+        if not scheduled_ts or scheduled_ts <= 0: # No schedule or invalid
+            # print("No active schedule found.")
+            # self.schedule_check_timer.Stop() # Optional: stop if no schedule
+            return
+
+        current_ts = int(datetime.now().timestamp())
+        if current_ts >= scheduled_ts:
+            print(f"Scheduled time {datetime.fromtimestamp(scheduled_ts)} reached. Starting queue.")
+            db.save_schedule_time(None) # Clear the schedule from DB
+            self.update_scheduled_time_display() # Update UI
+
+            if not self.queue_items:
+                wx.MessageBox("Scheduled time reached, but the queue is empty.",
+                              "Queue Empty", wx.OK | wx.ICON_INFORMATION)
+                if self.schedule_check_timer.IsRunning(): self.schedule_check_timer.Stop() # Stop timer
+                return
+
+            # Check if another synthesis (manual or other) started in the meantime
+            if self.synthesis_in_progress or self.queue_processing_active:
+                 print("Synthesis/Queue processing started by other means before scheduled time could trigger. Schedule ignored.")
+                 return
+
+            self.on_run_queue(event=None) # Trigger queue processing
+            # Timer will continue running, or could be stopped if preferred after a run
+            # For now, let it run; it won't do anything until a new schedule is set.
+        # else:
+            # print(f"Scheduled time {datetime.fromtimestamp(scheduled_ts)} not yet reached.")
+
+
+    def on_remove_queue_item(self, event, queue_item_id):
+        """Handles removal of a specific item from the queue."""
+        if self.queue_processing_active:
+            # Find the item being processed
+            if self.current_queue_item_index >= 0 and self.current_queue_item_index < len(self.queue_items):
+                currently_processing_item_id = self.queue_items[self.current_queue_item_index].get('id')
+                if currently_processing_item_id == queue_item_id:
+                    wx.MessageBox("Cannot remove an item that is currently being processed.",
+                                  "Action Not Allowed", wx.OK | wx.ICON_WARNING)
+                    return
+
+        # Optional: Confirmation dialog
+        # confirm = wx.MessageBox(f"Are you sure you want to remove this item from the queue?",
+        #                         "Confirm Removal", wx.YES_NO | wx.ICON_QUESTION)
+        # if confirm == wx.NO:
+        #     return
+
+        db.remove_queue_item(queue_item_id)
+        self.queue_items = db.get_queued_items() # Reload queue from DB
+        self.refresh_queue_tab() # Refresh the UI display
+
+        # If the removed item was before the currently processing one, adjust index
+        # This is a bit tricky if items are reordered or if current_queue_item_index
+        # refers to the old list. Simplest is to let process_next_queue_item handle it,
+        # or re-evaluate current_queue_item_index based on the new list if processing.
+        # For now, if queue is active, it might try to process an item that shifted index.
+        # However, remove_queue_item is typically for non-active queues or items not yet processed.
+
+        wx.MessageBox("Item removed from queue.", "Queue Updated", wx.OK | wx.ICON_INFORMATION)
+
 
     def on_run_queue(self, event):
         if not self.queue_items:
@@ -822,12 +1042,21 @@ class MainWindow(wx.Frame):
             wx.MessageBox("Queue processing is already active.", "Queue Running", wx.OK | wx.ICON_INFORMATION)
             return
 
+        # Clear any existing schedule if queue is run manually
+        if db.load_schedule_time():
+            db.save_schedule_time(None) # Clear schedule from DB
+            self.update_scheduled_time_display() # Update UI
+            print("Manual queue run initiated, existing schedule cleared.")
+
         self.queue_processing_active = True
         self.current_queue_item_index = 0 # Start with the first item
         # self.queue_to_process = list(self.queue_items) # Process a copy
 
         if self.run_queue_button:
             self.run_queue_button.Disable()
+        if self.schedule_queue_button: # Also disable schedule button
+            self.schedule_queue_button.Disable()
+
 
         self.start_button.Disable() # Disable single start button as well
         self.params_panel.Disable() # Disable params panel
@@ -973,6 +1202,9 @@ class MainWindow(wx.Frame):
         self.synthesis_in_progress = False # Reset general flag
         self.current_queue_item_index = -1
         # self.queue_to_process = [] # Clear the processing copy
+
+        # Ensure schedule display is up-to-date (e.g. if it was cleared by starting queue)
+        self.update_scheduled_time_display()
 
         # Remove items from DB that were successfully processed or errored out
         items_to_remove_from_db = [
@@ -1191,25 +1423,52 @@ class MainWindow(wx.Frame):
                     for i, chap in enumerate(book['chapters']):
                         chapters_list_ctrl.InsertItem(i, "") # Checkbox column
                         chapters_list_ctrl.SetItem(i, 1, chap['title'])
-                        chapters_list_ctrl.SetItem(i, 2, chap['status'])
-                        if chap['is_selected_for_synthesis']:
+
+                        status_display = chap['status']
+                        is_completed = chap['status'] == 'completed'
+
+                        if is_completed:
+                            status_display = "✅ Completed"
+                            # chapters_list_ctrl.SetItem(i, 0, "✓") # Show a checkmark, actual disabling is tricky for LC_Report
+
+                        chapters_list_ctrl.SetItem(i, 2, status_display)
+
+                        if chap['is_selected_for_synthesis'] and not is_completed:
                             chapters_list_ctrl.CheckItem(i)
 
                         # Store chapter_id with the item for the event handler
                         chapters_list_ctrl.SetItemData(i, chap['id'])
 
+                        # Disable checkbox for completed items.
+                        # wx.ListCtrl.EnableCheckBoxes() is for the whole control.
+                        # Individual checkbox disabling is not directly supported.
+                        # A workaround is to handle it in the check event or use a different control.
+                        # For now, the status column will indicate completion.
+                        # We can prevent re-checking in the event handler.
+
                     # Define event handler for this specific chapters_list_ctrl
-                    def create_chapter_check_handler(list_ctrl_instance):
+                    def create_chapter_check_handler(list_ctrl_instance, book_chapters_data):
                         def on_chapter_check(event):
                             chapter_idx = event.GetIndex()
                             chapter_id = list_ctrl_instance.GetItemData(chapter_idx)
+                            # Find the chapter's original data to check its status
+                            original_chapter_data = next((c for c in book_chapters_data if c['id'] == chapter_id), None)
+
+                            if original_chapter_data and original_chapter_data['status'] == 'completed':
+                                # If chapter is completed, prevent checking/unchecking by reverting the check state
+                                current_ui_checked_state = list_ctrl_instance.IsItemChecked(chapter_idx)
+                                list_ctrl_instance.CheckItem(chapter_idx, not current_ui_checked_state) # Revert
+                                wx.MessageBox("This chapter has already been processed and its selection cannot be changed here.",
+                                              "Chapter Processed", wx.OK | wx.ICON_INFORMATION)
+                                return
+
                             is_checked = list_ctrl_instance.IsItemChecked(chapter_idx)
                             update_staged_chapter_selection(chapter_id, is_checked)
                         return on_chapter_check
 
-                    handler = create_chapter_check_handler(chapters_list_ctrl)
+                    handler = create_chapter_check_handler(chapters_list_ctrl, book['chapters'])
                     chapters_list_ctrl.Bind(wx.EVT_LIST_ITEM_CHECKED, handler)
-                    chapters_list_ctrl.Bind(wx.EVT_LIST_ITEM_UNCHECKED, handler)
+                    chapters_list_ctrl.Bind(wx.EVT_LIST_ITEM_UNCHECKED, handler) # Same handler for uncheck
                     book_sizer.Add(chapters_list_ctrl, 1, wx.ALL | wx.EXPAND, 5)
                 else:
                     # Parent of no_chapters_label should be book_box
@@ -1228,6 +1487,21 @@ class MainWindow(wx.Frame):
         # self.Layout() # Main frame layout, might be too broad, staging_tab_panel.Layout() should suffice.
         self.splitter.Layout() # Layout the main splitter that contains left and right
         self.Layout() # Full frame layout might be needed if sizers changed overall frame size.
+
+    def update_staging_tab_for_processed_chapters(self, processed_staged_chapter_ids: list[int]):
+        """
+        Refreshes the staging tab to reflect the 'completed' status of chapters
+        that were processed as part of a queue item.
+        """
+        # This method will find the relevant book and chapter in the staging tab UI
+        # and update its visual representation (e.g., disable checkbox, show checkmark).
+        # For now, a full refresh of the staging tab is the simplest way.
+        # More granular updates can be implemented if performance becomes an issue.
+        print(f"Updating staging tab for processed chapter IDs: {processed_staged_chapter_ids}")
+        # Potentially, find the specific book and chapters_list_ctrl to update
+        # For now, just trigger a full refresh.
+        self.refresh_staging_tab()
+
 
     def on_queue_selected_staged_chapters(self, event, book_id, book_title, chapters_list_ctrl):
         selected_chapters_for_queue = []
@@ -1252,7 +1526,7 @@ class MainWindow(wx.Frame):
                     'text_content': text # Store fetched text (might be None if fetch failed)
                 })
 
-        if not chapters_for_db:
+        if not selected_chapters_for_queue: # Use the correct variable name
             wx.MessageBox("No chapters selected. Please check the selection.",
                           "No Selection", wx.OK | wx.ICON_INFORMATION)
             return
@@ -1275,7 +1549,7 @@ class MainWindow(wx.Frame):
             'book_title': book_title,
             'source_path': None, # Staged items don't have a direct source_path for the queue item itself
             'synthesis_settings': synthesis_settings,
-            'chapters': chapters_for_db
+            'chapters': selected_chapters_for_queue # Use the correct variable name
         }
 
         new_item_id = db.add_item_to_queue(db_queue_details)
@@ -1283,7 +1557,7 @@ class MainWindow(wx.Frame):
             self.queue_items = db.get_queued_items() # Reload queue
             self.refresh_queue_tab()
             self.notebook.SetSelection(self.notebook.GetPageCount() - 1)
-            wx.MessageBox(f"Added '{book_title}' (with {len(chapters_for_db)} selected chapter(s)) to the queue.",
+            wx.MessageBox(f"Added '{book_title}' (with {len(selected_chapters_for_queue)} selected chapter(s)) to the queue.", # Use the correct variable name
                           "Added to Queue", wx.OK | wx.ICON_INFORMATION)
         else:
             wx.MessageBox("Failed to add item to the database queue.", "Error", wx.OK | wx.ICON_ERROR)
@@ -1400,6 +1674,90 @@ class CoreThread(threading.Thread):
         for k, v in kwargs.items():
             setattr(event_object, k, v)
         wx.PostEvent(wx.GetApp().GetTopWindow(), event_object)
+
+
+class ScheduleDialog(wx.Dialog):
+    def __init__(self, parent):
+        super().__init__(parent, title="Schedule Queue", size=(400, 250))
+        self.selected_datetime = None
+
+        panel = wx.Panel(self)
+        vbox = wx.BoxSizer(wx.VERTICAL)
+
+        # Instruction
+        instruction = wx.StaticText(panel, label="Select a date and time for the queue to start:")
+        vbox.Add(instruction, 0, wx.ALL | wx.EXPAND, 15)
+
+        # Date Picker
+        date_box = wx.BoxSizer(wx.HORIZONTAL)
+        date_label = wx.StaticText(panel, label="Date:")
+        self.date_picker = wx.adv.DatePickerCtrl(panel, style=wx.adv.DP_DEFAULT | wx.adv.DP_SHOWCENTURY)
+
+        # Initialize with current date or saved schedule
+        current_schedule_ts = db.load_schedule_time()
+        initial_date = datetime.now()
+        if current_schedule_ts and current_schedule_ts > 0:
+            try:
+                initial_date = datetime.fromtimestamp(current_schedule_ts)
+            except ValueError: # Handle potential invalid timestamp from DB
+                pass
+        self.date_picker.SetValue(wx.DateTime.FromDMY(initial_date.day, initial_date.month - 1, initial_date.year))
+
+        date_box.Add(date_label, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 5)
+        date_box.Add(self.date_picker, 1, wx.EXPAND)
+        vbox.Add(date_box, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 10)
+
+        # Time Picker
+        time_box = wx.BoxSizer(wx.HORIZONTAL)
+        time_label = wx.StaticText(panel, label="Time (HH:MM):")
+        # Using TimePickerCtrl if available and suitable, otherwise TextCtrl
+        # For simplicity and wider compatibility, using TextCtrl with format hint
+        self.time_picker = wx.TextCtrl(panel, value=initial_date.strftime("%H:%M"))
+        self.time_picker.SetToolTip("Enter time in 24-hour HH:MM format")
+
+        time_box.Add(time_label, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 5)
+        time_box.Add(self.time_picker, 1, wx.EXPAND)
+        vbox.Add(time_box, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 10)
+
+        # Buttons
+        hbox_buttons = wx.BoxSizer(wx.HORIZONTAL)
+        ok_button = wx.Button(panel, label="Set Schedule", id=wx.ID_OK)
+        ok_button.SetDefault()
+        clear_button = wx.Button(panel, label="Clear Schedule")
+        cancel_button = wx.Button(panel, label="Cancel", id=wx.ID_CANCEL)
+
+        ok_button.Bind(wx.EVT_BUTTON, self.on_ok)
+        clear_button.Bind(wx.EVT_BUTTON, self.on_clear)
+        # cancel_button's ID_CANCEL is handled by default dialog behavior
+
+        hbox_buttons.Add(ok_button)
+        hbox_buttons.Add(clear_button, 0, wx.LEFT, 5)
+        hbox_buttons.Add(cancel_button, 0, wx.LEFT, 5)
+        vbox.Add(hbox_buttons, 0, wx.ALIGN_CENTER | wx.TOP | wx.BOTTOM, 10)
+
+        panel.SetSizer(vbox)
+        self.CentreOnParent()
+
+    def on_ok(self, event):
+        wx_date = self.date_picker.GetValue()
+        date_val = datetime(wx_date.GetYear(), wx_date.GetMonth() + 1, wx_date.GetDay())
+
+        time_str = self.time_picker.GetValue()
+        try:
+            time_val = datetime.strptime(time_str, "%H:%M").time()
+        except ValueError:
+            wx.MessageBox("Invalid time format. Please use HH:MM (24-hour).", "Error", wx.OK | wx.ICON_ERROR, self)
+            return
+
+        self.selected_datetime = datetime.combine(date_val.date(), time_val)
+        self.EndModal(wx.ID_OK)
+
+    def on_clear(self, event):
+        self.selected_datetime = None # Indicate clearance
+        self.EndModal(wx.ID_OK) # Still ID_OK to signal dialog was actioned, parent checks selected_datetime
+
+    def get_selected_datetime(self):
+        return self.selected_datetime
 
 
 def main():
