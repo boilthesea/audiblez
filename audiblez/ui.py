@@ -703,13 +703,21 @@ class MainWindow(wx.Frame):
 
     def refresh_queue_tab(self):
         # Clear existing content from the queue_tab_panel's sizer
-        for child in self.queue_tab_sizer.GetChildren():
-            # child.GetWindow().Destroy() # This might be too aggressive if sizer items are not windows
-            self.queue_tab_sizer.Hide(child.GetWindow()) # Hide the window
-            self.queue_tab_sizer.Remove(child.GetWindow()) # Remove from sizer
-            if child.GetWindow():
-                 child.GetWindow().Destroy()
-
+        if hasattr(self, 'queue_tab_sizer') and self.queue_tab_sizer:
+            # Clear the sizer and delete all windows it managed.
+            # This is the most common and robust way to reset a sizer's content.
+            self.queue_tab_sizer.Clear(delete_windows=True)
+            # Any windows previously in the sizer (like individual queue item boxes,
+            # the 'empty queue' text, or the run_queue_button if it was part of it)
+            # are now destroyed. They will be recreated as needed below.
+            # If self.run_queue_button was a child and was part of this sizer,
+            # it is now destroyed, and self.run_queue_button would be a stale reference.
+            # The existing logic for creating/showing the button later in this method
+            # (e.g., `if not self.run_queue_button:`) should ideally handle
+            # the recreation if self.run_queue_button becomes None or if operations on a stale
+            # reference lead to expected errors that are gracefully handled.
+            # For now, we rely on Clear() to do its job and the subsequent button logic
+            # to correctly reconstruct or re-add the button.
 
         if not self.queue_items:
             no_items_label = wx.StaticText(self.queue_tab_panel, label="The synthesis queue is empty.")
@@ -1097,14 +1105,14 @@ class MainWindow(wx.Frame):
             'chapters': []
         }
         for i, chap_obj in enumerate(selected_chapters_from_table):
-            db_queue_details['chapters'].append({
+            queue_entry['chapters'].append({
                 'staged_chapter_id': None,
                 'title': chap_obj.short_name,
                 'text_content': chap_obj.extracted_text, # Store text directly for non-staged items
                 'order': i
             })
 
-        new_item_id = db.add_item_to_queue(db_queue_details)
+        new_item_id = db.add_item_to_queue(queue_entry)
         if new_item_id:
             self.queue_items = db.get_queued_items() # Reload queue
             self.refresh_queue_tab()

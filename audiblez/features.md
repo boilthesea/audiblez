@@ -98,9 +98,9 @@ This plan outlines the steps to implement the features described in `audiblez/fe
     *   The `core.main` function already handles output folder creation based on its parameters, which are derived from queued item settings.
     *   UI updates to show current item progress via main progress bar.
 *   **Phase 1.6: State Persistence and UI Updates** [PARTIALLY DONE]
-    *   Database persistence for queue items (adding, removing, status updates) is implemented (`database.py`).
-    *   UI loads queue items from the database on startup (to be implemented in next UI integration step).
-    *   UI updates status of items in the "Queue" tab display during processing.
+    *   Database persistence for queue items (adding, removing, status updates) is implemented (`database.py`). [DONE]
+    *   UI loads queue items from the database on startup. [DONE]
+    *   UI updates status of items in the "Queue" tab display during processing. [DONE]
     *   (Pending) Update the UI to reflect the status of chapters in the "Staging" tab *specifically based on queue completion* (e.g., replace checkbox with a checkmark). Current staging tab shows general status if chapters are processed individually.
     *   (Pending) UI for manually removing items from the "Queue" tab (and thus database). `remove_queue_item` in `database.py` exists.
 *   **Phase 1.7: Scheduling Functionality** [PENDING]
