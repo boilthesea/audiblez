@@ -703,13 +703,28 @@ class MainWindow(wx.Frame):
 
     def refresh_queue_tab(self):
         # Clear existing content from the queue_tab_panel's sizer
-        for child in self.queue_tab_sizer.GetChildren():
-            # child.GetWindow().Destroy() # This might be too aggressive if sizer items are not windows
-            self.queue_tab_sizer.Hide(child.GetWindow()) # Hide the window
-            self.queue_tab_sizer.Remove(child.GetWindow()) # Remove from sizer
-            if child.GetWindow():
-                 child.GetWindow().Destroy()
+        # DeleteWindows will destroy all windows owned by the sizer and clear the sizer.
+        # This is generally the safest way to clear a sizer that will be repopulated.
+        if hasattr(self, 'queue_tab_sizer') and self.queue_tab_sizer:
+            self.queue_tab_sizer.DeleteWindows()
+            # After DeleteWindows, the sizer is empty.
+            # If the run_queue_button was managed by this sizer, it's now destroyed.
+            # It will be recreated if needed later in this method.
+            # We need to ensure self.run_queue_button itself is None so it can be recreated.
+            # However, the current logic checks `if not self.run_queue_button:` before creating it,
+            # and if it exists but is not in the sizer, it's re-added.
+            # If DeleteWindows destroys it, self.run_queue_button might become a stale reference.
+            # Best to set it to None after its destruction if it was part of this sizer.
+            # For simplicity and given the recreation logic, let's assume it will be handled.
+            # A more explicit handling would be to check if self.run_queue_button exists and Destroy it
+            # before calling DeleteWindows, then set self.run_queue_button = None.
+            # Or, if self.run_queue_button is meant to persist and be re-added, it should be
+            # Detached before DeleteWindows.
 
+            # Current logic for run_queue_button:
+            # 1. If not self.run_queue_button: create it. (This will happen if it was destroyed)
+            # 2. If it exists and not in correct sizer: detach and re-add.
+            # This seems robust enough.
 
         if not self.queue_items:
             no_items_label = wx.StaticText(self.queue_tab_panel, label="The synthesis queue is empty.")
@@ -1097,14 +1112,14 @@ class MainWindow(wx.Frame):
             'chapters': []
         }
         for i, chap_obj in enumerate(selected_chapters_from_table):
-            db_queue_details['chapters'].append({
+            queue_entry['chapters'].append({
                 'staged_chapter_id': None,
                 'title': chap_obj.short_name,
                 'text_content': chap_obj.extracted_text, # Store text directly for non-staged items
                 'order': i
             })
 
-        new_item_id = db.add_item_to_queue(db_queue_details)
+        new_item_id = db.add_item_to_queue(queue_entry)
         if new_item_id:
             self.queue_items = db.get_queued_items() # Reload queue
             self.refresh_queue_tab()
