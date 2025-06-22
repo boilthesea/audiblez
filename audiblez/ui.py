@@ -1233,22 +1233,16 @@ class MainWindow(wx.Frame):
                 chapter_title = chapters_list_ctrl.GetItem(i, 1).GetText()
                 # We need to fetch the actual chapter content or rely on processor to do so using chapter_id_in_db
                 # For now, just storing title and ID. The core logic will need to handle fetching by ID.
+                text = db.get_chapter_text_content(chapter_id_in_db)
+                if text is None:
+                    # Log warning, but allow queuing. process_next_queue_item will try to re-fetch.
+                    print(f"Warning: Could not fetch text for staged chapter ID {chapter_id_in_db} ('{chapter_title}') during queuing. Will attempt fetch during processing.")
+
                 selected_chapters_for_queue.append({
                     'id': chapter_id_in_db, # db id
                     'title': chapter_title,
-                    # Fetch text content for each chapter to be stored in queued_chapters
-                    text = db.get_chapter_text_content(chapter_id_in_db)
-                    if text is None:
-                        # Log warning, but allow queuing. process_next_queue_item will try to re-fetch.
-                        print(f"Warning: Could not fetch text for staged chapter ID {chapter_id_in_db} ('{chapter_title}') during queuing. Will attempt fetch during processing.")
-
-                    chapters_for_db.append({
-                        'staged_chapter_id': chapter_id_in_db,
-                        'title': chapter_title,
-                        'text_content': text, # Store fetched text (might be None if fetch failed)
-                        'order': current_chapter_order_in_item
-                    })
-                    current_chapter_order_in_item +=1
+                    'text_content': text # Store fetched text (might be None if fetch failed)
+                })
 
         if not chapters_for_db:
             wx.MessageBox("No chapters selected. Please check the selection.",
