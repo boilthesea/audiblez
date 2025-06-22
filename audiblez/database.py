@@ -61,23 +61,40 @@ def create_tables(conn: sqlite3.Connection):
         )
     """)
 
-    # Synthesis Queue Table
+    # Synthesis Queue Table (New Schema)
+    # Drop the old one if it exists to avoid conflicts during development
+    # In a production migration, you'd use ALTER TABLE or a more careful approach.
+    cursor.execute("DROP TABLE IF EXISTS synthesis_queue") # Add this line
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS synthesis_queue (
+        CREATE TABLE synthesis_queue (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            item_type TEXT NOT NULL, -- 'chapter' or 'book_compilation'
-            item_id INTEGER NOT NULL, -- Foreign key to staged_chapters.id or staged_books.id
-            engine TEXT,
-            voice TEXT,
-            speed REAL,
-            output_folder TEXT, -- Can be different from staged_books.output_folder if overridden at queue time
-            status TEXT DEFAULT 'pending', -- e.g., pending, processing, completed, error
-            added_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            processing_start_time TIMESTAMP,
-            processing_end_time TIMESTAMP,
-            scheduled_time TIMESTAMP -- For scheduled tasks
+            staged_book_id INTEGER,
+            book_title TEXT NOT NULL,
+            source_path TEXT,
+            synthesis_settings TEXT NOT NULL, -- JSON string: {voice, speed, engine, output_folder}
+            status TEXT NOT NULL DEFAULT 'pending', -- 'pending', 'in_progress', 'completed', 'error'
+            queue_order INTEGER NOT NULL,
+            date_added TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (staged_book_id) REFERENCES staged_books (id) ON DELETE SET NULL
         )
     """)
+
+    # Queued Chapters Table
+    cursor.execute("DROP TABLE IF EXISTS queued_chapters") # Add this line
+    cursor.execute("""
+        CREATE TABLE queued_chapters (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            queue_item_id INTEGER NOT NULL,
+            staged_chapter_id INTEGER, -- FK to staged_chapters.id if item from staging
+            chapter_title TEXT NOT NULL,
+            chapter_order INTEGER NOT NULL, -- Order of this chapter within its parent queue item
+            text_content TEXT, -- Full text, can be NULL if fetched on demand
+            FOREIGN KEY (queue_item_id) REFERENCES synthesis_queue (id) ON DELETE CASCADE,
+            FOREIGN KEY (staged_chapter_id) REFERENCES staged_chapters (id) ON DELETE SET NULL
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_queued_chapters_queue_item_id ON queued_chapters (queue_item_id)")
+
 
     conn.commit()
 
@@ -331,5 +348,201 @@ def update_staged_book_final_compilation(book_id: int, final_compilation: bool):
         conn.commit()
     except sqlite3.Error as e:
         print(f"Database error in update_staged_book_final_compilation: {e}")
+    finally:
+        conn.close()
+
+# --- Queue Management Functions ---
+import json
+
+def get_max_queue_order() -> int:
+    """Gets the current maximum queue_order from the synthesis_queue table."""
+    conn = connect_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT MAX(queue_order) FROM synthesis_queue")
+        result = cursor.fetchone()
+        return result[0] if result and result[0] is not None else 0
+    except sqlite3.Error as e:
+        print(f"Database error in get_max_queue_order: {e}")
+        return 0 # Default to 0 if error or no items
+    finally:
+        conn.close()
+
+def add_item_to_queue(details: dict) -> int | None:
+    """Adds an item and its chapters to the synthesis queue.
+
+    Args:
+        details (dict): A dictionary containing item details:
+            {
+                'staged_book_id': book_id_or_none,
+                'book_title': 'Title',
+                'source_path': path_or_none,
+                'synthesis_settings': {'voice': 'v', 'speed': 1.0, ...},
+                'chapters': [
+                    {'staged_chapter_id': chap_id_or_none, 'title': 'Chap 1',
+                     'text_content': '...', 'order': 0 (this is chapter_order within the queue item)},
+                    ...
+                ]
+            }
+    Returns:
+        int | None: The ID of the newly added synthesis_queue item, or None if an error occurs.
+    """
+    conn = connect_db()
+    cursor = conn.cursor()
+    try:
+        current_max_order = get_max_queue_order()
+        new_queue_order = current_max_order + 1
+
+        synthesis_settings_json = json.dumps(details.get('synthesis_settings', {}))
+
+        cursor.execute("""
+            INSERT INTO synthesis_queue
+                (staged_book_id, book_title, source_path, synthesis_settings, status, queue_order)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (
+            details.get('staged_book_id'),
+            details.get('book_title'),
+            details.get('source_path'),
+            synthesis_settings_json,
+            'pending', # Initial status
+            new_queue_order
+        ))
+        queue_item_id = cursor.lastrowid
+        if not queue_item_id:
+            conn.rollback()
+            return None
+
+        chapters_to_insert = []
+        for chap_detail in details.get('chapters', []):
+            chapters_to_insert.append((
+                queue_item_id,
+                chap_detail.get('staged_chapter_id'),
+                chap_detail.get('title'),
+                chap_detail.get('order'), # This is chapter_order for this queue item
+                chap_detail.get('text_content') # May be null
+            ))
+
+        if chapters_to_insert:
+            cursor.executemany("""
+                INSERT INTO queued_chapters
+                    (queue_item_id, staged_chapter_id, chapter_title, chapter_order, text_content)
+                VALUES (?, ?, ?, ?, ?)
+            """, chapters_to_insert)
+
+        conn.commit()
+        return queue_item_id
+    except sqlite3.Error as e:
+        print(f"Database error in add_item_to_queue: {e}")
+        conn.rollback()
+        return None
+    finally:
+        conn.close()
+
+def get_queued_items() -> list:
+    """Retrieves all items from synthesis_queue, ordered by queue_order, with their chapters."""
+    conn = connect_db()
+    cursor = conn.cursor()
+    queued_items_map = {}
+    try:
+        # Fetch all queue items
+        cursor.execute("""
+            SELECT id, staged_book_id, book_title, source_path, synthesis_settings, status, queue_order, date_added
+            FROM synthesis_queue ORDER BY queue_order ASC
+        """)
+        raw_queue_items = cursor.fetchall()
+
+        for item_row in raw_queue_items:
+            item_id = item_row[0]
+            settings_json = item_row[4]
+            try:
+                synthesis_settings = json.loads(settings_json)
+            except json.JSONDecodeError:
+                synthesis_settings = {} # Default if JSON is malformed
+
+            queued_items_map[item_id] = {
+                'id': item_id,
+                'staged_book_id': item_row[1],
+                'book_title': item_row[2],
+                'source_path': item_row[3],
+                'synthesis_settings': synthesis_settings,
+                'status': item_row[5],
+                'queue_order': item_row[6],
+                'date_added': item_row[7],
+                'chapters': []
+            }
+
+        if not queued_items_map:
+            return []
+
+        # Fetch all chapters and assign them to their respective queue items
+        # Using IN clause to fetch chapters only for the items retrieved
+        item_ids_placeholder = ','.join(['?'] * len(queued_items_map))
+        sql_chapters = f"""
+            SELECT qc.id, qc.queue_item_id, qc.staged_chapter_id, qc.chapter_title,
+                   qc.chapter_order, qc.text_content
+            FROM queued_chapters qc
+            WHERE qc.queue_item_id IN ({item_ids_placeholder})
+            ORDER BY qc.queue_item_id, qc.chapter_order ASC
+        """
+        cursor.execute(sql_chapters, tuple(queued_items_map.keys()))
+        chapters_data = cursor.fetchall()
+
+        for chap_row in chapters_data:
+            queue_item_id = chap_row[1]
+            if queue_item_id in queued_items_map:
+                queued_items_map[queue_item_id]['chapters'].append({
+                    'id': chap_row[0], # queued_chapters.id
+                    'staged_chapter_id': chap_row[2],
+                    'title': chap_row[3],
+                    'order': chap_row[4],
+                    'text_content': chap_row[5] # May be None
+                })
+
+        return list(queued_items_map.values())
+
+    except sqlite3.Error as e:
+        print(f"Database error in get_queued_items: {e}")
+        return []
+    finally:
+        conn.close()
+
+def update_queue_item_status(queue_item_id: int, status: str):
+    """Updates the status of a specific queue item."""
+    conn = connect_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("UPDATE synthesis_queue SET status = ? WHERE id = ?", (status, queue_item_id))
+        conn.commit()
+    except sqlite3.Error as e:
+        print(f"Database error in update_queue_item_status: {e}")
+    finally:
+        conn.close()
+
+def remove_queue_item(queue_item_id: int):
+    """Removes a queue item and its associated chapters from the database."""
+    conn = connect_db()
+    cursor = conn.cursor()
+    try:
+        # Cascading delete should handle queued_chapters if ON DELETE CASCADE is effective.
+        # Explicitly deleting chapters first can also be done if preferred or for compatibility.
+        # cursor.execute("DELETE FROM queued_chapters WHERE queue_item_id = ?", (queue_item_id,))
+        cursor.execute("DELETE FROM synthesis_queue WHERE id = ?", (queue_item_id,))
+        conn.commit()
+    except sqlite3.Error as e:
+        print(f"Database error in remove_queue_item: {e}")
+    finally:
+        conn.close()
+
+def get_chapter_text_content(staged_chapter_id: int) -> str | None:
+    """Retrieves text_content for a given staged_chapter_id."""
+    conn = connect_db()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT text_content FROM staged_chapters WHERE id = ?", (staged_chapter_id,))
+        result = cursor.fetchone()
+        return result[0] if result else None
+    except sqlite3.Error as e:
+        print(f"Database error in get_chapter_text_content: {e}")
+        return None
     finally:
         conn.close()

@@ -80,27 +80,30 @@ This plan outlines the steps to implement the features described in `audiblez/fe
     *   Store the staged book and its chapters in the database, including book metadata.
     *   Display staged chapters nested under the book title in the "Staging" tab, with checkboxes for selection.
     *   Add a "Final Compilation" checkbox per book in the "Staging" tab.
-*   **Phase 1.3: Queuing Functionality**
+*   **Phase 1.3: Queuing Functionality** [DONE]
     *   Add a "Queue Selected Chapters" option in the "Staging" tab.
     *   Implement logic to add selected chapters from the "Staging" tab to the "Queue" tab.
-    *   When queuing, capture the current synthesis settings (engine, voice, speed, output folder, output type - assuming output type is added later) and store them with the queued item in the database.
-    *   Add an option to "Queue Whole Book" directly from the "Chapters" tab, which stages the book and then queues all its chapters with current settings.
-*   **Phase 1.4: Queue Display and Management**
-    *   Display queued items in the "Queue" tab, showing the captured settings for each item.
-    *   Implement the summary display for queued chapters (e.g., "Chapter 1-5", "Chapter 1, 3, 5...").
-    *   Implement the tooltip functionality to show all chapters in a queued item on mouseover.
-*   **Phase 1.5: Queue Processing**
-    *   Add a "Run Queue" button at the bottom of the "Queue" tab.
+    *   When queuing, capture the current synthesis settings (engine, voice, speed, output folder) and store them with the queued item in the database.
+    *   Add an option to "Queue Selected Book Portions" (formerly "Queue Whole Book") directly from the "Chapters" tab, which queues selected chapters from the currently loaded book with current settings.
+    *   Database support for storing queue items and their chapters implemented in `database.py`.
+*   **Phase 1.4: Queue Display and Management** [DONE]
+    *   Display queued items in the "Queue" tab, showing the captured settings for each item (engine, voice, speed, output folder), book title, and a summary of chapters.
+    *   Item status (Pending, In Progress, Completed, Error) is displayed for each queue item.
+    *   (Minor pending: Tooltip to show all chapters on mouseover if list is very long - current summary is generally sufficient).
+*   **Phase 1.5: Queue Processing** [DONE]
+    *   Add a "Run Queue" button at the bottom of the "Queue" tab (visible if items are in queue and not currently processing).
     *   Implement logic to process items in the queue sequentially.
     *   For each queued item, retrieve the stored settings and chapters.
     *   Execute the synthesis process for the chapters using the stored settings.
-    *   Create a new folder for the WAV files for each queued book synthesis job.
-*   **Phase 1.6: State Persistence and UI Updates**
-    *   Modify the synthesis process to update the status of chapters in the database as they are completed.
-    *   Update the UI to reflect the status of chapters in the "Staging" tab (e.g., replace checkbox with a checkmark for completed chapters).
-    *   Add the ability to remove items from the staging area and queue as well as the database when doing so.
-    *   Implement loading the state of staged books, chapters, and the queue from the database on application startup.
-*   **Phase 1.7: Scheduling Functionality**
+    *   The `core.main` function already handles output folder creation based on its parameters, which are derived from queued item settings.
+    *   UI updates to show current item progress via main progress bar.
+*   **Phase 1.6: State Persistence and UI Updates** [PARTIALLY DONE]
+    *   Database persistence for queue items (adding, removing, status updates) is implemented (`database.py`). [DONE]
+    *   UI loads queue items from the database on startup. [DONE]
+    *   UI updates status of items in the "Queue" tab display during processing. [DONE]
+    *   (Pending) Update the UI to reflect the status of chapters in the "Staging" tab *specifically based on queue completion* (e.g., replace checkbox with a checkmark). Current staging tab shows general status if chapters are processed individually.
+    *   (Pending) UI for manually removing items from the "Queue" tab (and thus database). `remove_queue_item` in `database.py` exists.
+*   **Phase 1.7: Scheduling Functionality** [PENDING]
     *   Add a "Schedule Queue" button at the bottom of the "Queue" tab.
     *   Implement a mechanism to allow the user to specify a specific date and time to start processing the queue.
     *   Implement logic to trigger the queue processing at the specified time.
