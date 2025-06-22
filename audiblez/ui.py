@@ -1504,7 +1504,7 @@ class MainWindow(wx.Frame):
 
 
     def on_queue_selected_staged_chapters(self, event, book_id, book_title, chapters_list_ctrl):
-        selected_chapters_for_queue = []
+        raw_selected_chapters_data = []
         if not chapters_list_ctrl: # Should not happen if button is present
             wx.MessageBox("Error: Chapter list not found for this book.", "Error", wx.OK | wx.ICON_ERROR)
             return
@@ -1513,23 +1513,31 @@ class MainWindow(wx.Frame):
             if chapters_list_ctrl.IsItemChecked(i):
                 chapter_id_in_db = chapters_list_ctrl.GetItemData(i) # This is the DB ID of the chapter
                 chapter_title = chapters_list_ctrl.GetItem(i, 1).GetText()
-                # We need to fetch the actual chapter content or rely on processor to do so using chapter_id_in_db
-                # For now, just storing title and ID. The core logic will need to handle fetching by ID.
                 text = db.get_chapter_text_content(chapter_id_in_db)
                 if text is None:
                     # Log warning, but allow queuing. process_next_queue_item will try to re-fetch.
                     print(f"Warning: Could not fetch text for staged chapter ID {chapter_id_in_db} ('{chapter_title}') during queuing. Will attempt fetch during processing.")
 
-                selected_chapters_for_queue.append({
-                    'id': chapter_id_in_db, # db id
+                raw_selected_chapters_data.append({
+                    'db_id': chapter_id_in_db, # Original DB ID from staged_chapters
                     'title': chapter_title,
                     'text_content': text # Store fetched text (might be None if fetch failed)
                 })
 
-        if not selected_chapters_for_queue: # Use the correct variable name
+        if not raw_selected_chapters_data:
             wx.MessageBox("No chapters selected. Please check the selection.",
                           "No Selection", wx.OK | wx.ICON_INFORMATION)
             return
+
+        # Prepare the 'chapters' list for add_item_to_queue
+        final_chapters_for_db = []
+        for idx, chap_data in enumerate(raw_selected_chapters_data):
+            final_chapters_for_db.append({
+                'staged_chapter_id': chap_data['db_id'], # This key is expected by add_item_to_queue
+                'title': chap_data['title'],
+                'text_content': chap_data['text_content'],
+                'order': idx # This provides the chapter_order for queued_chapters
+            })
 
         # Retrieve current global synthesis settings
         current_engine = 'cuda' if self.cuda_radio.GetValue() else 'cpu'
@@ -1549,7 +1557,7 @@ class MainWindow(wx.Frame):
             'book_title': book_title,
             'source_path': None, # Staged items don't have a direct source_path for the queue item itself
             'synthesis_settings': synthesis_settings,
-            'chapters': selected_chapters_for_queue # Use the correct variable name
+            'chapters': final_chapters_for_db
         }
 
         new_item_id = db.add_item_to_queue(db_queue_details)
@@ -1557,7 +1565,7 @@ class MainWindow(wx.Frame):
             self.queue_items = db.get_queued_items() # Reload queue
             self.refresh_queue_tab()
             self.notebook.SetSelection(self.notebook.GetPageCount() - 1)
-            wx.MessageBox(f"Added '{book_title}' (with {len(selected_chapters_for_queue)} selected chapter(s)) to the queue.", # Use the correct variable name
+            wx.MessageBox(f"Added '{book_title}' (with {len(final_chapters_for_db)} selected chapter(s)) to the queue.",
                           "Added to Queue", wx.OK | wx.ICON_INFORMATION)
         else:
             wx.MessageBox("Failed to add item to the database queue.", "Error", wx.OK | wx.ICON_ERROR)
