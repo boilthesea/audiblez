@@ -811,104 +811,38 @@ class MainWindow(wx.Frame):
 
                 self.queue_tab_sizer.Add(item_sizer, 0, wx.ALL | wx.EXPAND, 10)
 
-        # Add "Run Queue" button if items exist
-        if self.queue_items:
-            if not self.run_queue_button: # Create only if it doesn't exist
-                 self.run_queue_button = wx.Button(self.queue_tab_panel, label="🚀 Run Queue")
-                 self.run_queue_button.Bind(wx.EVT_BUTTON, self.on_run_queue)
-
-            # Ensure button is added to sizer if not already (e.g. after being removed)
-            # Check if the button is already managed by a sizer and if that sizer is self.queue_tab_sizer
-            button_already_in_correct_sizer = False
-            if self.run_queue_button.GetContainingSizer() == self.queue_tab_sizer:
-                button_already_in_correct_sizer = True
-
-            if not button_already_in_correct_sizer:
-                 # If it's in another sizer or no sizer, remove it first if necessary before adding
-                 # This check might be too simple if button could be in a sub-sizer of queue_tab_sizer
-                 if self.run_queue_button.GetContainingSizer():
-                     self.run_queue_button.GetContainingSizer().Detach(self.run_queue_button)
-                 self.queue_tab_sizer.Add(self.run_queue_button, 0, wx.ALL | wx.ALIGN_CENTER, 10)
-
-            self.run_queue_button.Enable(not self.queue_processing_active)
-            self.run_queue_button.Show(True) # Ensure it's visible
-        elif self.run_queue_button: # No items, but button exists
-            self.run_queue_button.Show(False) # Hide if no items
-            if self.run_queue_button.GetContainingSizer() == self.queue_tab_sizer:
-                 self.queue_tab_sizer.Detach(self.run_queue_button)
-            # Optionally destroy: self.run_queue_button.Destroy(); self.run_queue_button = None
-
         # Sizer for action buttons (Run, Schedule) and scheduled time text
         action_controls_sizer = wx.BoxSizer(wx.HORIZONTAL)
 
         if self.queue_items:
-            # Run Queue Button (ensure it's managed by action_controls_sizer now)
-            if self.run_queue_button: # Should exist if there are items
-                if self.run_queue_button.GetContainingSizer() and self.run_queue_button.GetContainingSizer() != action_controls_sizer:
-                    self.run_queue_button.GetContainingSizer().Detach(self.run_queue_button)
-                if not self.run_queue_button.GetContainingSizer():
-                    action_controls_sizer.Add(self.run_queue_button, 0, wx.ALL | wx.ALIGN_CENTER, 5)
-                # State (Enable/Show) of run_queue_button is managed where it's created/updated based on queue_items presence
+            # Create buttons and text FRESHLY each time, as Clear(delete_windows=True) destroyed old ones.
+            self.run_queue_button = wx.Button(self.queue_tab_panel, label="🚀 Run Queue")
+            self.run_queue_button.Bind(wx.EVT_BUTTON, self.on_run_queue)
+            action_controls_sizer.Add(self.run_queue_button, 0, wx.ALL | wx.ALIGN_CENTER, 5)
+            self.run_queue_button.Enable(not self.queue_processing_active)
 
-            # Schedule Queue Button
-            if not self.schedule_queue_button:
-                self.schedule_queue_button = wx.Button(self.queue_tab_panel, label="📅 Schedule Queue")
-                self.schedule_queue_button.Bind(wx.EVT_BUTTON, self.on_schedule_queue)
-
-            if self.schedule_queue_button.GetContainingSizer() != action_controls_sizer:
-                 if self.schedule_queue_button.GetContainingSizer():
-                     self.schedule_queue_button.GetContainingSizer().Detach(self.schedule_queue_button)
-                 action_controls_sizer.Add(self.schedule_queue_button, 0, wx.ALL | wx.ALIGN_CENTER, 5)
+            self.schedule_queue_button = wx.Button(self.queue_tab_panel, label="📅 Schedule Queue")
+            self.schedule_queue_button.Bind(wx.EVT_BUTTON, self.on_schedule_queue)
+            action_controls_sizer.Add(self.schedule_queue_button, 0, wx.ALL | wx.ALIGN_CENTER, 5)
             self.schedule_queue_button.Enable(not self.queue_processing_active)
-            self.schedule_queue_button.Show(True)
 
-            # Scheduled Time Display
-            if not self.scheduled_time_text:
-                self.scheduled_time_text = wx.StaticText(self.queue_tab_panel, label="")
-
-            if self.scheduled_time_text.GetContainingSizer() != action_controls_sizer:
-                if self.scheduled_time_text.GetContainingSizer():
-                    self.scheduled_time_text.GetContainingSizer().Detach(self.scheduled_time_text)
-                action_controls_sizer.Add(self.scheduled_time_text, 0, wx.ALL | wx.ALIGN_CENTER | wx.LEFT, 10)
-            self.update_scheduled_time_display()
-            self.scheduled_time_text.Show(True)
+            self.scheduled_time_text = wx.StaticText(self.queue_tab_panel, label="")
+            action_controls_sizer.Add(self.scheduled_time_text, 0, wx.ALL | wx.ALIGN_CENTER | wx.LEFT, 10)
+            self.update_scheduled_time_display() # This will set the label for scheduled_time_text
 
             if action_controls_sizer.GetItemCount() > 0:
-                 # Check if action_controls_sizer is already in queue_tab_sizer to avoid adding multiple times
-                 is_present = False
-                 for item in self.queue_tab_sizer.GetChildren():
-                     if item.GetSizer() == action_controls_sizer:
-                         is_present = True
-                         break
-                 if not is_present:
-                    self.queue_tab_sizer.Add(action_controls_sizer, 0, wx.ALL | wx.ALIGN_CENTER, 5)
-
-        else: # No items in queue
-            if self.run_queue_button and self.run_queue_button.IsShown():
-                 if self.run_queue_button.GetContainingSizer(): self.run_queue_button.GetContainingSizer().Detach(self.run_queue_button)
-                 self.run_queue_button.Show(False) # Hide if no items
-            if self.schedule_queue_button and self.schedule_queue_button.IsShown():
-                if self.schedule_queue_button.GetContainingSizer(): self.schedule_queue_button.GetContainingSizer().Detach(self.schedule_queue_button)
-                self.schedule_queue_button.Show(False)
-            if self.scheduled_time_text and self.scheduled_time_text.IsShown():
-                if self.scheduled_time_text.GetContainingSizer(): self.scheduled_time_text.GetContainingSizer().Detach(self.scheduled_time_text)
-                self.scheduled_time_text.Show(False)
-
-            # If action_controls_sizer is part of queue_tab_sizer and now empty, try to remove it.
-            # This logic can be tricky if other items are in action_controls_sizer.
-            # For now, detaching individual items is safer. If action_controls_sizer itself should be removed:
-            is_present = False
-            for item in self.queue_tab_sizer.GetChildren():
-                if item.GetSizer() == action_controls_sizer:
-                    is_present = True
-                    break
-            if is_present and action_controls_sizer.GetItemCount() == 0 :
-                self.queue_tab_sizer.Detach(action_controls_sizer) # Detach sizer itself
-                # action_controls_sizer.Clear(delete_windows=True) # Optionally clear it if it's not going to be reused immediately
+                self.queue_tab_sizer.Add(action_controls_sizer, 0, wx.ALL | wx.ALIGN_CENTER, 5)
+        else:
+            # Ensure instance variables are None if controls are not created / relevant
+            self.run_queue_button = None
+            self.schedule_queue_button = None
+            self.scheduled_time_text = None
+            # Any existing action_controls_sizer (if it was managed at instance level)
+            # would have been cleared by self.queue_tab_sizer.Clear(delete_windows=True)
+            # if it was added to queue_tab_sizer. Here, action_controls_sizer is local.
 
         self.queue_tab_panel.SetupScrolling()
         self.queue_tab_panel.Layout()
-        # self.Layout() # Avoid full frame layout if possible, let parent sizers handle it.
 
     def update_scheduled_time_display(self):
         if not hasattr(self, 'scheduled_time_text') or not self.scheduled_time_text:
@@ -1504,7 +1438,7 @@ class MainWindow(wx.Frame):
 
 
     def on_queue_selected_staged_chapters(self, event, book_id, book_title, chapters_list_ctrl):
-        selected_chapters_for_queue = []
+        raw_selected_chapters_data = []
         if not chapters_list_ctrl: # Should not happen if button is present
             wx.MessageBox("Error: Chapter list not found for this book.", "Error", wx.OK | wx.ICON_ERROR)
             return
@@ -1513,23 +1447,31 @@ class MainWindow(wx.Frame):
             if chapters_list_ctrl.IsItemChecked(i):
                 chapter_id_in_db = chapters_list_ctrl.GetItemData(i) # This is the DB ID of the chapter
                 chapter_title = chapters_list_ctrl.GetItem(i, 1).GetText()
-                # We need to fetch the actual chapter content or rely on processor to do so using chapter_id_in_db
-                # For now, just storing title and ID. The core logic will need to handle fetching by ID.
                 text = db.get_chapter_text_content(chapter_id_in_db)
                 if text is None:
                     # Log warning, but allow queuing. process_next_queue_item will try to re-fetch.
                     print(f"Warning: Could not fetch text for staged chapter ID {chapter_id_in_db} ('{chapter_title}') during queuing. Will attempt fetch during processing.")
 
-                selected_chapters_for_queue.append({
-                    'id': chapter_id_in_db, # db id
+                raw_selected_chapters_data.append({
+                    'db_id': chapter_id_in_db, # Original DB ID from staged_chapters
                     'title': chapter_title,
                     'text_content': text # Store fetched text (might be None if fetch failed)
                 })
 
-        if not selected_chapters_for_queue: # Use the correct variable name
+        if not raw_selected_chapters_data:
             wx.MessageBox("No chapters selected. Please check the selection.",
                           "No Selection", wx.OK | wx.ICON_INFORMATION)
             return
+
+        # Prepare the 'chapters' list for add_item_to_queue
+        final_chapters_for_db = []
+        for idx, chap_data in enumerate(raw_selected_chapters_data):
+            final_chapters_for_db.append({
+                'staged_chapter_id': chap_data['db_id'], # This key is expected by add_item_to_queue
+                'title': chap_data['title'],
+                'text_content': chap_data['text_content'],
+                'order': idx # This provides the chapter_order for queued_chapters
+            })
 
         # Retrieve current global synthesis settings
         current_engine = 'cuda' if self.cuda_radio.GetValue() else 'cpu'
@@ -1549,7 +1491,7 @@ class MainWindow(wx.Frame):
             'book_title': book_title,
             'source_path': None, # Staged items don't have a direct source_path for the queue item itself
             'synthesis_settings': synthesis_settings,
-            'chapters': selected_chapters_for_queue # Use the correct variable name
+            'chapters': final_chapters_for_db
         }
 
         new_item_id = db.add_item_to_queue(db_queue_details)
@@ -1557,7 +1499,7 @@ class MainWindow(wx.Frame):
             self.queue_items = db.get_queued_items() # Reload queue
             self.refresh_queue_tab()
             self.notebook.SetSelection(self.notebook.GetPageCount() - 1)
-            wx.MessageBox(f"Added '{book_title}' (with {len(selected_chapters_for_queue)} selected chapter(s)) to the queue.", # Use the correct variable name
+            wx.MessageBox(f"Added '{book_title}' (with {len(final_chapters_for_db)} selected chapter(s)) to the queue.",
                           "Added to Queue", wx.OK | wx.ICON_INFORMATION)
         else:
             wx.MessageBox("Failed to add item to the database queue.", "Error", wx.OK | wx.ICON_ERROR)
