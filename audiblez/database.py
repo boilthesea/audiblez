@@ -113,10 +113,10 @@ def save_user_setting(setting_name: str, setting_value):
         cursor.execute("SELECT id FROM user_settings WHERE id = 1")
         row = cursor.fetchone()
 
-            valid_columns = ["engine", "voice", "speed", "custom_rate", "next_scheduled_run"]
-            if setting_name not in valid_columns:
-                print(f"Error: Invalid setting_name '{setting_name}' for update/insert.")
-                return # Or raise an error
+        valid_columns = ["engine", "voice", "speed", "custom_rate", "next_scheduled_run"]
+        if setting_name not in valid_columns:
+            print(f"Error: Invalid setting_name '{setting_name}' for update/insert.")
+            return # Or raise an error
 
         if row:
             # Update existing row
