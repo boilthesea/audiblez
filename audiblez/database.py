@@ -14,8 +14,9 @@ def connect_db():
         os.makedirs(app_dir)
 
     db_path = os.path.join(app_dir, "audiblez.db")
-    print(f"DEBUG_DB: Connecting to DB: {db_path}")
+    # print(f"DEBUG_DB: Connecting to DB: {db_path}") # Original print, can be removed if id(conn) is enough
     conn = sqlite3.connect(db_path)
+    print(f"DEBUG_DB: connect_db created connection object with id: {id(conn)} for path: {db_path}")
     create_tables(conn)
     cursor = conn.cursor() # Create a cursor to query schema
     try:
@@ -369,19 +370,29 @@ def load_schedule_time() -> int | None:
 # --- Queue Management Functions ---
 import json
 
-def get_max_queue_order() -> int:
-    """Gets the current maximum queue_order from the synthesis_queue table."""
-    conn = connect_db()
-    cursor = conn.cursor()
+def get_max_queue_order(conn_param: sqlite3.Connection | None = None) -> int:
+    """Gets the current maximum queue_order from the synthesis_queue table.
+    Accepts an optional connection parameter."""
+    conn_to_use = conn_param
+    was_conn_provided = conn_param is not None
+
+    if conn_to_use is None:
+        conn_to_use = connect_db()
+
+    print(f"DEBUG_DB: get_max_queue_order using connection id: {id(conn_to_use)} (was_provided: {was_conn_provided})")
+    cursor = conn_to_use.cursor()
+
     try:
         cursor.execute("SELECT MAX(queue_order) FROM synthesis_queue")
         result = cursor.fetchone()
-        return result[0] if result and result[0] is not None else 0
+        max_order = result[0] if result and result[0] is not None else 0
+        return max_order
     except sqlite3.Error as e:
         print(f"Database error in get_max_queue_order: {e}")
-        return 0 # Default to 0 if error or no items
+        return 0  # Default to 0 if error or no items
     finally:
-        conn.close()
+        if not was_conn_provided and conn_to_use: # Only close if created internally
+            conn_to_use.close()
 
 def add_item_to_queue(details: dict) -> int | None:
     """Adds an item and its chapters to the synthesis queue.
@@ -402,11 +413,13 @@ def add_item_to_queue(details: dict) -> int | None:
     Returns:
         int | None: The ID of the newly added synthesis_queue item, or None if an error occurs.
     """
-    conn = connect_db()
-    cursor = conn.cursor()
+    conn = None # Initialize conn to None for the finally block
     try:
+        conn = connect_db()
+        print(f"DEBUG_DB: add_item_to_queue using connection id: {id(conn)}")
+        cursor = conn.cursor()
         print(f"DEBUG_DB: add_item_to_queue received details: {details}")
-        current_max_order = get_max_queue_order()
+        current_max_order = get_max_queue_order(conn) # Pass the connection
         new_queue_order = current_max_order + 1
         print(f"DEBUG_DB: new_queue_order: {new_queue_order}")
 
@@ -459,14 +472,17 @@ def add_item_to_queue(details: dict) -> int | None:
         print("DEBUG_DB: add_item_to_queue rolled back due to SQLite error.")
         return None
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 def get_queued_items() -> list:
     """Retrieves all items from synthesis_queue, ordered by queue_order, with their chapters."""
-    conn = connect_db()
-    cursor = conn.cursor()
-    queued_items_map = {}
+    conn = None # Initialize conn to None for the finally block
     try:
+        conn = connect_db()
+        print(f"DEBUG_DB: get_queued_items using connection id: {id(conn)}")
+        cursor = conn.cursor()
+        queued_items_map = {}
         print("DEBUG_DB: get_queued_items called.")
         # Fetch all queue items
         cursor.execute("""
@@ -534,7 +550,8 @@ def get_queued_items() -> list:
         print(f"Database error in get_queued_items: {e}")
         return []
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 def update_queue_item_status(queue_item_id: int, status: str):
     """Updates the status of a specific queue item."""

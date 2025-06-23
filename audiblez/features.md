@@ -128,10 +128,15 @@ This plan outlines the steps to implement the features described in `audiblez/fe
             *   `print("DEBUG: Creating initial placeholder for Queue tab.")` (when the initial placeholder is added)
     *   Debugging statements added to `audiblez/database.py`:
         *   In `connect_db()`:
-            *   `print(f"DEBUG_DB: Connecting to DB: {db_path}")`
-            *   `print(f"DEBUG_DB: synthesis_queue table schema: {cursor.execute('PRAGMA table_info(synthesis_queue)').fetchall()}")`
-            *   `print(f"DEBUG_DB: queued_chapters table schema: {cursor.execute('PRAGMA table_info(queued_chapters)').fetchall()}")`
+            *   `print(f"DEBUG_DB: connect_db created connection object with id: {id(conn)} for path: {db_path}")`
+            *   `print(f"DEBUG_DB: synthesis_queue table schema: {cursor.execute('PRAGMA table_info(synthesis_queue)').fetchall()}")` (executed within `connect_db`)
+            *   `print(f"DEBUG_DB: queued_chapters table schema: {cursor.execute('PRAGMA table_info(queued_chapters)').fetchall()}")` (executed within `connect_db`)
+        *   In `get_max_queue_order(conn_param: sqlite3.Connection | None = None)`:
+            *   Refactored to accept an optional `conn_param`.
+            *   `print(f"DEBUG_DB: get_max_queue_order using connection id: {id(conn_to_use)} (was_provided: {was_conn_provided})")`
         *   In `add_item_to_queue()`:
+            *   Uses a single connection for all its operations, including the call to `get_max_queue_order`.
+            *   `print(f"DEBUG_DB: add_item_to_queue using connection id: {id(conn)}")`
             *   `print(f"DEBUG_DB: add_item_to_queue received details: {details}")`
             *   `print(f"DEBUG_DB: synthesis_settings_json: {synthesis_settings_json}")`
             *   `print(f"DEBUG_DB: new_queue_order: {new_queue_order}")`
@@ -139,6 +144,7 @@ This plan outlines the steps to implement the features described in `audiblez/fe
             *   `print(f"DEBUG_DB: chapters_to_insert for queued_chapters: {chapters_to_insert}")`
             *   `print("DEBUG_DB: add_item_to_queue committed successfully.")` or `print("DEBUG_DB: add_item_to_queue rolled back.")`
         *   In `get_queued_items()`:
+            *   `print(f"DEBUG_DB: get_queued_items using connection id: {id(conn)}")`
             *   `print("DEBUG_DB: get_queued_items called.")`
             *   `print(f"DEBUG_DB: Raw items from synthesis_queue: {raw_queue_items}")`
             *   If `raw_queue_items` is empty: `print("DEBUG_DB: No items found in synthesis_queue table.")`
