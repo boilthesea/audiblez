@@ -79,9 +79,8 @@ def create_tables(conn: sqlite3.Connection):
     """)
 
     # Synthesis Queue Table (New Schema)
-    # Drop the old one if it exists to avoid conflicts during development
-    # In a production migration, you'd use ALTER TABLE or a more careful approach.
-    cursor.execute("DROP TABLE IF EXISTS synthesis_queue") # Add this line
+    # The following DROP TABLE line was causing data loss and has been removed.
+    # cursor.execute("DROP TABLE IF EXISTS synthesis_queue")
     cursor.execute("""
         CREATE TABLE synthesis_queue (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -97,7 +96,8 @@ def create_tables(conn: sqlite3.Connection):
     """)
 
     # Queued Chapters Table
-    cursor.execute("DROP TABLE IF EXISTS queued_chapters") # Add this line
+    # The following DROP TABLE line was causing data loss and has been removed.
+    # cursor.execute("DROP TABLE IF EXISTS queued_chapters")
     cursor.execute("""
         CREATE TABLE queued_chapters (
             id INTEGER PRIMARY KEY AUTOINCREMENT,

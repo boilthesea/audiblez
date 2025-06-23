@@ -126,34 +126,14 @@ This plan outlines the steps to implement the features described in `audiblez/fe
             *   `print("DEBUG: Calling self.notebook.Layout() and self.splitter_left.Layout()")` (before the calls)
         *   In `create_notebook_and_tabs` (for Queue tab setup):
             *   `print("DEBUG: Creating initial placeholder for Queue tab.")` (when the initial placeholder is added)
-    *   Debugging statements added to `audiblez/database.py`:
-        *   In `connect_db()`:
-            *   `print(f"DEBUG_DB: connect_db created connection object with id: {id(conn)} for path: {db_path}")`
-            *   `print(f"DEBUG_DB: synthesis_queue table schema: {cursor.execute('PRAGMA table_info(synthesis_queue)').fetchall()}")` (executed within `connect_db`)
-            *   `print(f"DEBUG_DB: queued_chapters table schema: {cursor.execute('PRAGMA table_info(queued_chapters)').fetchall()}")` (executed within `connect_db`)
-        *   In `get_max_queue_order(conn_param: sqlite3.Connection | None = None)`:
-            *   Refactored to accept an optional `conn_param`.
-            *   `print(f"DEBUG_DB: get_max_queue_order using connection id: {id(conn_to_use)} (was_provided: {was_conn_provided})")`
-        *   In `add_item_to_queue()`:
-            *   Uses a single connection for all its operations, including the call to `get_max_queue_order`.
-            *   `print(f"DEBUG_DB: add_item_to_queue using connection id: {id(conn)}")`
-            *   `print(f"DEBUG_DB: add_item_to_queue received details: {details}")`
-            *   `print(f"DEBUG_DB: synthesis_settings_json: {synthesis_settings_json}")`
-            *   `print(f"DEBUG_DB: new_queue_order: {new_queue_order}")`
-            *   `print(f"DEBUG_DB: synthesis_queue insert generated queue_item_id: {queue_item_id}")`
-            *   `print(f"DEBUG_DB: chapters_to_insert for queued_chapters: {chapters_to_insert}")`
-            *   `print("DEBUG_DB: add_item_to_queue committed successfully.")` or `print("DEBUG_DB: add_item_to_queue rolled back.")`
-        *   In `get_queued_items()`:
-            *   `print(f"DEBUG_DB: get_queued_items using connection id: {id(conn)}")`
-            *   `print("DEBUG_DB: get_queued_items called.")`
-            *   `print(f"DEBUG_DB: Raw items from synthesis_queue: {raw_queue_items}")`
-            *   If `raw_queue_items` is empty: `print("DEBUG_DB: No items found in synthesis_queue table.")`
-            *   `print(f"DEBUG_DB: Item IDs placeholder for chapter query: {item_ids_placeholder}")`
-            *   `print(f"DEBUG_DB: Chapters data from queued_chapters: {chapters_data}")`
-            *   `print(f"DEBUG_DB: Final items returned by get_queued_items: {list(queued_items_map.values())}")`
+    *   Debugging statements added to `audiblez/database.py` (most can be removed after fix confirmation):
+        *   Key fix: Removed `DROP TABLE IF EXISTS synthesis_queue` and `DROP TABLE IF EXISTS queued_chapters` from `create_tables` function. This was identified as the root cause of items not persisting.
+        *   Remaining debug prints in `database.py` (for connection IDs, function calls, and data states) are temporarily kept for verification and will be removed as per Phase 1.9.
+        *   Refactored `get_max_queue_order` to accept an optional connection parameter.
+        *   Ensured `add_item_to_queue` uses a single connection for its internal operations.
 
 *   **Phase 1.9: Remove Queue Display Debugging Statements** [PENDING]
-    *   Once the queue display bug is identified and resolved, all `print()` statements added in Phase 1.8 should be removed from `audiblez/ui.py` and `audiblez/database.py`.
+    *   Once the queue display bug is confirmed fixed, all remaining `print()` statements added in Phase 1.8 (from `audiblez/ui.py` and `audiblez/database.py`) should be removed.
 
 **Phase 2: Calibre Integration**
 
