@@ -141,7 +141,14 @@ def main(file_path, voice, pick_manually, speed, output_folder='.',
     for i, chapter in enumerate(selected_chapters, start=1):
         if max_chapters and i > max_chapters: break
         text = chapter.extracted_text
-        xhtml_file_name = chapter.get_name().replace(' ', '_').replace('/', '_').replace('\\', '_')
+        # Use chapter.title if get_name() is not available (for ChapterForCore objects from queue)
+        if hasattr(chapter, 'get_name'):
+            original_name = chapter.get_name()
+        elif hasattr(chapter, 'title'):
+            original_name = chapter.title
+        else:
+            original_name = f"chapter_{i}" # Fallback if neither is present
+        xhtml_file_name = original_name.replace(' ', '_').replace('/', '_').replace('\\', '_')
         chapter_wav_path = Path(output_folder) / filename.replace(extension, f'_chapter_{i}_{voice}_{xhtml_file_name}.wav')
         chapter_wav_files.append(chapter_wav_path)
         if Path(chapter_wav_path).exists():
