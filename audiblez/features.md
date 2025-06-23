@@ -108,6 +108,27 @@ This plan outlines the steps to implement the features described in `audiblez/fe
     *   Implement a mechanism to allow the user to specify a specific date and time to start processing the queue. [DONE]
     *   Implement logic to trigger the queue processing at the specified time. [DONE]
 
+*   **Phase 1.8: Debugging Queue Display Issues** [IN PROGRESS]
+    *   Purpose: To trace the flow of data and UI updates related to the queue tab, to identify why queued items are not appearing.
+    *   Debugging statements added to `audiblez/ui.py`:
+        *   In `on_queue_selected_book_portions` and `on_queue_selected_staged_chapters`:
+            *   `print(f"DEBUG: Before DB reload, self.queue_items: {self.queue_items}")`
+            *   `print(f"DEBUG: After DB reload, self.queue_items: {self.queue_items}")`
+            *   `print("DEBUG: Calling refresh_queue_tab()")`
+        *   In `refresh_queue_tab`:
+            *   `print(f"DEBUG: refresh_queue_tab called. self.queue_items: {self.queue_items}")`
+            *   `print("DEBUG: Called self.queue_tab_sizer.Clear(delete_windows=True)")` (after the call)
+            *   If `self.queue_items` is empty: `print("DEBUG: Queue is empty, adding placeholder label.")`
+            *   Inside the loop for items:
+                *   `print(f"DEBUG: Processing queue item {item_idx}: {item_data.get('book_title')}")`
+                *   `print(f"DEBUG: Added item_sizer for {item_data.get('book_title')} to queue_tab_sizer.")` (after adding)
+            *   `print("DEBUG: Calling self.queue_tab_panel.SetupScrolling() and .Layout()")` (before the calls)
+            *   `print("DEBUG: Calling self.notebook.Layout() and self.splitter_left.Layout()")` (before the calls)
+        *   In `create_notebook_and_tabs` (for Queue tab setup):
+            *   `print("DEBUG: Creating initial placeholder for Queue tab.")` (when the initial placeholder is added)
+*   **Phase 1.9: Remove Queue Display Debugging Statements** [PENDING]
+    *   Once the queue display bug is identified and resolved, all `print()` statements added in Phase 1.8 should be removed from `audiblez/ui.py`.
+
 **Phase 2: Calibre Integration**
 
 *   **Phase 2.1: Add Calibre Option to UI**
