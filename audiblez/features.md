@@ -126,19 +126,17 @@ This plan outlines the steps to implement the features described in `audiblez/fe
             *   `print("DEBUG: Calling self.notebook.Layout() and self.splitter_left.Layout()")` (before the calls)
         *   In `create_notebook_and_tabs` (for Queue tab setup):
             *   `print("DEBUG: Creating initial placeholder for Queue tab.")` (when the initial placeholder is added)
-    *   Debugging Journey & Findings:
+    *   Debugging Journey & Findings: [DONE]
         *   Initial issue: Queue items not displayed in UI. UI debug logs showed `self.queue_items` was always empty.
-        *   Database debug logs (round 1): Showed items were committed by `add_item_to_queue` but `get_queued_items` found nothing. Connection ID printing showed different connection lifecycles for add vs. get.
-        *   Identified `DROP TABLE IF EXISTS ...` for `synthesis_queue` and `queued_chapters` in `create_tables` as problematic, as `create_tables` was called with each new connection (e.g., once for `add_item_to_queue`, then again for `get_queued_items`), wiping data.
-        *   Attempted Fix 1: Removed `DROP TABLE ...` statements.
-        *   New Error from Fix 1: `sqlite3.OperationalError: table synthesis_queue already exists`. This occurred because the `CREATE TABLE` statements for `synthesis_queue` and `queued_chapters` were missing the `IF NOT EXISTS` clause. While other tables had `IF NOT EXISTS`, these two crucial ones did not.
-    *   Current Fix:
-        *   Ensure `DROP TABLE ...` statements for `synthesis_queue` and `queued_chapters` remain removed from `create_tables`.
-        *   Modify the `CREATE TABLE` statements for `synthesis_queue` and `queued_chapters` in `create_tables` to include `IF NOT EXISTS`.
-    *   Remaining debug prints in `ui.py` and `database.py` are kept for one more verification round and will be removed as per Phase 1.9.
+        *   Database debug logs (round 1): Showed items were committed by `add_item_to_queue` but `get_queued_items` found nothing.
+        *   Root Cause: The `DROP TABLE IF EXISTS ...` statements for `synthesis_queue` and `queued_chapters` in the `create_tables` function were being executed on every new database connection. Since `connect_db()` (which calls `create_tables()`) was invoked by each high-level database operation (like adding an item, then getting all items), the queue tables were being wiped immediately after creation or before subsequent reads.
+        *   Resolution:
+            1.  Removed the `DROP TABLE IF EXISTS ...` statements for `synthesis_queue` and `queued_chapters` from `create_tables`.
+            2.  Ensured the `CREATE TABLE` statements for `synthesis_queue` and `queued_chapters` correctly included the `IF NOT EXISTS` clause to prevent errors when `create_tables` is called multiple times after the tables already exist.
+    *   This resolved the issue, and items now correctly persist in the database and are displayed in the queue tab.
 
-*   **Phase 1.9: Remove Queue Display Debugging Statements** [PENDING]
-    *   Once the queue display bug is confirmed fixed, all remaining `print()` statements added in Phase 1.8 (from `audiblez/ui.py` and `audiblez/database.py`) should be removed.
+*   **Phase 1.9: Remove Queue Display Debugging Statements** [DONE]
+    *   All temporary `print()` statements added for debugging the queue display issue in `audiblez/ui.py` and `audiblez/database.py` have been removed.
 
 **Phase 2: Calibre Integration**
 
