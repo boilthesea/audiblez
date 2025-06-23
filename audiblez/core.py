@@ -27,6 +27,8 @@ from kokoro import KPipeline
 from ebooklib import epub
 from pick import pick
 
+from audiblez.database import load_user_setting # Added
+
 sample_rate = 24000
 
 
@@ -104,10 +106,29 @@ def main(file_path, voice, pick_manually, speed, output_folder='.',
     if not has_ffmpeg:
         print('\033[91m' + 'ffmpeg not found. Please install ffmpeg to create mp3 and m4b audiobook files.' + '\033[0m')
 
+    # Load custom rate from database and determine chars_per_sec for stats
+    db_custom_rate = load_user_setting('custom_rate')
+    default_chars_per_sec = 500 if torch.cuda.is_available() else 50
+    current_chars_per_sec = default_chars_per_sec
+
+    if db_custom_rate is not None:
+        try:
+            rate_from_db = int(db_custom_rate)
+            if rate_from_db > 0:
+                current_chars_per_sec = rate_from_db
+                print(f"Using custom characters-per-second rate from database: {current_chars_per_sec}")
+            else:
+                print(f"Invalid custom rate from database ({db_custom_rate}), using default: {default_chars_per_sec}")
+        except ValueError:
+            print(f"Could not parse custom rate from database ('{db_custom_rate}'), using default: {default_chars_per_sec}")
+    else:
+        print(f"No custom rate in database, using default: {default_chars_per_sec}")
+
     stats = SimpleNamespace(
         total_chars=sum(map(len, texts)),
         processed_chars=0,
-        chars_per_sec=500 if torch.cuda.is_available() else 50)
+        chars_per_sec=current_chars_per_sec # Use the determined rate
+    )
     print('Started at:', time.strftime('%H:%M:%S'))
     print(f'Total characters: {stats.total_chars:,}')
     print('Total words:', len(' '.join(texts).split()))
@@ -120,7 +141,14 @@ def main(file_path, voice, pick_manually, speed, output_folder='.',
     for i, chapter in enumerate(selected_chapters, start=1):
         if max_chapters and i > max_chapters: break
         text = chapter.extracted_text
-        xhtml_file_name = chapter.get_name().replace(' ', '_').replace('/', '_').replace('\\', '_')
+        # Use chapter.title if get_name() is not available (for ChapterForCore objects from queue)
+        if hasattr(chapter, 'get_name'):
+            original_name = chapter.get_name()
+        elif hasattr(chapter, 'title'):
+            original_name = chapter.title
+        else:
+            original_name = f"chapter_{i}" # Fallback if neither is present
+        xhtml_file_name = original_name.replace(' ', '_').replace('/', '_').replace('\\', '_')
         chapter_wav_path = Path(output_folder) / filename.replace(extension, f'_chapter_{i}_{voice}_{xhtml_file_name}.wav')
         chapter_wav_files.append(chapter_wav_path)
         if Path(chapter_wav_path).exists():
