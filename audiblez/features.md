@@ -108,6 +108,36 @@ This plan outlines the steps to implement the features described in `audiblez/fe
     *   Implement a mechanism to allow the user to specify a specific date and time to start processing the queue. [DONE]
     *   Implement logic to trigger the queue processing at the specified time. [DONE]
 
+*   **Phase 1.8: Debugging Queue Display Issues** [IN PROGRESS]
+    *   Purpose: To trace the flow of data and UI updates related to the queue tab, to identify why queued items are not appearing.
+    *   Debugging statements added to `audiblez/ui.py`:
+        *   In `on_queue_selected_book_portions` and `on_queue_selected_staged_chapters`:
+            *   `print(f"DEBUG: Before DB reload, self.queue_items: {self.queue_items}")`
+            *   `print(f"DEBUG: After DB reload, self.queue_items: {self.queue_items}")`
+            *   `print("DEBUG: Calling refresh_queue_tab()")`
+        *   In `refresh_queue_tab`:
+            *   `print(f"DEBUG: refresh_queue_tab called. self.queue_items: {self.queue_items}")`
+            *   `print("DEBUG: Called self.queue_tab_sizer.Clear(delete_windows=True)")` (after the call)
+            *   If `self.queue_items` is empty: `print("DEBUG: Queue is empty, adding placeholder label.")`
+            *   Inside the loop for items:
+                *   `print(f"DEBUG: Processing queue item {item_idx}: {item_data.get('book_title')}")`
+                *   `print(f"DEBUG: Added item_sizer for {item_data.get('book_title')} to queue_tab_sizer.")` (after adding)
+            *   `print("DEBUG: Calling self.queue_tab_panel.SetupScrolling() and .Layout()")` (before the calls)
+            *   `print("DEBUG: Calling self.notebook.Layout() and self.splitter_left.Layout()")` (before the calls)
+        *   In `create_notebook_and_tabs` (for Queue tab setup):
+            *   `print("DEBUG: Creating initial placeholder for Queue tab.")` (when the initial placeholder is added)
+    *   Debugging Journey & Findings: [DONE]
+        *   Initial issue: Queue items not displayed in UI. UI debug logs showed `self.queue_items` was always empty.
+        *   Database debug logs (round 1): Showed items were committed by `add_item_to_queue` but `get_queued_items` found nothing.
+        *   Root Cause: The `DROP TABLE IF EXISTS ...` statements for `synthesis_queue` and `queued_chapters` in the `create_tables` function were being executed on every new database connection. Since `connect_db()` (which calls `create_tables()`) was invoked by each high-level database operation (like adding an item, then getting all items), the queue tables were being wiped immediately after creation or before subsequent reads.
+        *   Resolution:
+            1.  Removed the `DROP TABLE IF EXISTS ...` statements for `synthesis_queue` and `queued_chapters` from `create_tables`.
+            2.  Ensured the `CREATE TABLE` statements for `synthesis_queue` and `queued_chapters` correctly included the `IF NOT EXISTS` clause to prevent errors when `create_tables` is called multiple times after the tables already exist.
+    *   This resolved the issue, and items now correctly persist in the database and are displayed in the queue tab.
+
+*   **Phase 1.9: Remove Queue Display Debugging Statements** [DONE]
+    *   All temporary `print()` statements added for debugging the queue display issue in `audiblez/ui.py` and `audiblez/database.py` have been removed.
+
 **Phase 2: Calibre Integration**
 
 *   **Phase 2.1: Add Calibre Option to UI**

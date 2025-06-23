@@ -162,6 +162,7 @@ class MainWindow(wx.Frame):
         self.queue_tab_panel.SetSizer(self.queue_tab_sizer)
         self.notebook.AddPage(self.queue_tab_panel, "Queue")
         if not self.queue_tab_sizer.GetChildren():
+            # print("DEBUG: Creating initial placeholder for Queue tab.")
             placeholder_queue = wx.StaticText(self.queue_tab_panel, label="Queued items will appear here.")
             self.queue_tab_sizer.Add(placeholder_queue, 0, wx.ALL | wx.ALIGN_CENTER, 15)
             self.queue_tab_panel.Layout()
@@ -732,10 +733,12 @@ class MainWindow(wx.Frame):
 
     def refresh_queue_tab(self):
         # Clear existing content from the queue_tab_panel's sizer
+        # print(f"DEBUG: refresh_queue_tab called. self.queue_items: {self.queue_items}")
         if hasattr(self, 'queue_tab_sizer') and self.queue_tab_sizer:
             # Clear the sizer and delete all windows it managed.
             # This is the most common and robust way to reset a sizer's content.
             self.queue_tab_sizer.Clear(delete_windows=True)
+            # print("DEBUG: Called self.queue_tab_sizer.Clear(delete_windows=True)")
             # Any windows previously in the sizer (like individual queue item boxes,
             # the 'empty queue' text, or the run_queue_button if it was part of it)
             # are now destroyed. They will be recreated as needed below.
@@ -751,8 +754,10 @@ class MainWindow(wx.Frame):
         if not self.queue_items:
             no_items_label = wx.StaticText(self.queue_tab_panel, label="The synthesis queue is empty.")
             self.queue_tab_sizer.Add(no_items_label, 0, wx.ALL | wx.ALIGN_CENTER, 15)
+            # print("DEBUG: Queue is empty, adding placeholder label.")
         else:
             for item_idx, item_data in enumerate(self.queue_items):
+                # print(f"DEBUG: Processing queue item {item_idx}: {item_data.get('book_title')}")
                 # Main container for each queue item
                 item_box_label = f"#{item_idx + 1}: {item_data['book_title']}"
                 # Add status to the label if present
@@ -810,6 +815,7 @@ class MainWindow(wx.Frame):
                 item_sizer.Add(remove_button, 0, wx.ALL | wx.ALIGN_CENTER, 5)
 
                 self.queue_tab_sizer.Add(item_sizer, 0, wx.ALL | wx.EXPAND, 10)
+                # print(f"DEBUG: Added item_sizer for {item_data.get('book_title')} to queue_tab_sizer.")
 
         # Sizer for action buttons (Run, Schedule) and scheduled time text
         action_controls_sizer = wx.BoxSizer(wx.HORIZONTAL)
@@ -841,8 +847,15 @@ class MainWindow(wx.Frame):
             # would have been cleared by self.queue_tab_sizer.Clear(delete_windows=True)
             # if it was added to queue_tab_sizer. Here, action_controls_sizer is local.
 
+        # print("DEBUG: Calling self.queue_tab_panel.SetupScrolling() and .Layout()")
         self.queue_tab_panel.SetupScrolling()
         self.queue_tab_panel.Layout()
+        if hasattr(self, 'notebook') and self.notebook:
+            # print("DEBUG: Calling self.notebook.Layout() and self.splitter_left.Layout()")
+            self.notebook.Layout()
+        if hasattr(self, 'splitter_left') and self.splitter_left:
+            self.splitter_left.Layout()
+        # self.Layout() # Optionally, layout the whole frame if needed
 
     def update_scheduled_time_display(self):
         if not hasattr(self, 'scheduled_time_text') or not self.scheduled_time_text:
@@ -1278,9 +1291,12 @@ class MainWindow(wx.Frame):
                 'order': i
             })
 
+        # print(f"DEBUG: Before DB reload, self.queue_items: {self.queue_items}")
         new_item_id = db.add_item_to_queue(queue_entry)
         if new_item_id:
             self.queue_items = db.get_queued_items() # Reload queue
+            # print(f"DEBUG: After DB reload, self.queue_items: {self.queue_items}")
+            # print("DEBUG: Calling refresh_queue_tab()")
             self.refresh_queue_tab()
             self.notebook.SetSelection(self.notebook.GetPageCount() - 1)
             wx.MessageBox(f"Added selected portions from '{self.selected_book_title}' (with {len(selected_chapters_from_table)} chapter(s)) to the queue.",
@@ -1494,9 +1510,12 @@ class MainWindow(wx.Frame):
             'chapters': final_chapters_for_db
         }
 
+        # print(f"DEBUG: Before DB reload, self.queue_items: {self.queue_items}")
         new_item_id = db.add_item_to_queue(db_queue_details)
         if new_item_id:
             self.queue_items = db.get_queued_items() # Reload queue
+            # print(f"DEBUG: After DB reload, self.queue_items: {self.queue_items}")
+            # print("DEBUG: Calling refresh_queue_tab()")
             self.refresh_queue_tab()
             self.notebook.SetSelection(self.notebook.GetPageCount() - 1)
             wx.MessageBox(f"Added '{book_title}' (with {len(final_chapters_for_db)} selected chapter(s)) to the queue.",
