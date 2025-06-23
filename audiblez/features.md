@@ -126,8 +126,28 @@ This plan outlines the steps to implement the features described in `audiblez/fe
             *   `print("DEBUG: Calling self.notebook.Layout() and self.splitter_left.Layout()")` (before the calls)
         *   In `create_notebook_and_tabs` (for Queue tab setup):
             *   `print("DEBUG: Creating initial placeholder for Queue tab.")` (when the initial placeholder is added)
+    *   Debugging statements added to `audiblez/database.py`:
+        *   In `connect_db()`:
+            *   `print(f"DEBUG_DB: Connecting to DB: {db_path}")`
+            *   `print(f"DEBUG_DB: synthesis_queue table schema: {cursor.execute('PRAGMA table_info(synthesis_queue)').fetchall()}")`
+            *   `print(f"DEBUG_DB: queued_chapters table schema: {cursor.execute('PRAGMA table_info(queued_chapters)').fetchall()}")`
+        *   In `add_item_to_queue()`:
+            *   `print(f"DEBUG_DB: add_item_to_queue received details: {details}")`
+            *   `print(f"DEBUG_DB: synthesis_settings_json: {synthesis_settings_json}")`
+            *   `print(f"DEBUG_DB: new_queue_order: {new_queue_order}")`
+            *   `print(f"DEBUG_DB: synthesis_queue insert generated queue_item_id: {queue_item_id}")`
+            *   `print(f"DEBUG_DB: chapters_to_insert for queued_chapters: {chapters_to_insert}")`
+            *   `print("DEBUG_DB: add_item_to_queue committed successfully.")` or `print("DEBUG_DB: add_item_to_queue rolled back.")`
+        *   In `get_queued_items()`:
+            *   `print("DEBUG_DB: get_queued_items called.")`
+            *   `print(f"DEBUG_DB: Raw items from synthesis_queue: {raw_queue_items}")`
+            *   If `raw_queue_items` is empty: `print("DEBUG_DB: No items found in synthesis_queue table.")`
+            *   `print(f"DEBUG_DB: Item IDs placeholder for chapter query: {item_ids_placeholder}")`
+            *   `print(f"DEBUG_DB: Chapters data from queued_chapters: {chapters_data}")`
+            *   `print(f"DEBUG_DB: Final items returned by get_queued_items: {list(queued_items_map.values())}")`
+
 *   **Phase 1.9: Remove Queue Display Debugging Statements** [PENDING]
-    *   Once the queue display bug is identified and resolved, all `print()` statements added in Phase 1.8 should be removed from `audiblez/ui.py`.
+    *   Once the queue display bug is identified and resolved, all `print()` statements added in Phase 1.8 should be removed from `audiblez/ui.py` and `audiblez/database.py`.
 
 **Phase 2: Calibre Integration**
 

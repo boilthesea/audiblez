@@ -14,8 +14,23 @@ def connect_db():
         os.makedirs(app_dir)
 
     db_path = os.path.join(app_dir, "audiblez.db")
+    print(f"DEBUG_DB: Connecting to DB: {db_path}")
     conn = sqlite3.connect(db_path)
     create_tables(conn)
+    cursor = conn.cursor() # Create a cursor to query schema
+    try:
+        # Log schema for synthesis_queue
+        cursor.execute('PRAGMA table_info(synthesis_queue)')
+        synthesis_queue_schema = cursor.fetchall()
+        print(f"DEBUG_DB: synthesis_queue table schema: {synthesis_queue_schema}")
+
+        # Log schema for queued_chapters
+        cursor.execute('PRAGMA table_info(queued_chapters)')
+        queued_chapters_schema = cursor.fetchall()
+        print(f"DEBUG_DB: queued_chapters table schema: {queued_chapters_schema}")
+    except sqlite3.Error as e:
+        print(f"DEBUG_DB: Error fetching schema: {e}")
+    # Do not close cursor here if conn is returned for other operations by the caller of create_tables
     return conn
 
 def create_tables(conn: sqlite3.Connection):
@@ -390,10 +405,13 @@ def add_item_to_queue(details: dict) -> int | None:
     conn = connect_db()
     cursor = conn.cursor()
     try:
+        print(f"DEBUG_DB: add_item_to_queue received details: {details}")
         current_max_order = get_max_queue_order()
         new_queue_order = current_max_order + 1
+        print(f"DEBUG_DB: new_queue_order: {new_queue_order}")
 
         synthesis_settings_json = json.dumps(details.get('synthesis_settings', {}))
+        print(f"DEBUG_DB: synthesis_settings_json: {synthesis_settings_json}")
 
         cursor.execute("""
             INSERT INTO synthesis_queue
@@ -408,8 +426,10 @@ def add_item_to_queue(details: dict) -> int | None:
             new_queue_order
         ))
         queue_item_id = cursor.lastrowid
+        print(f"DEBUG_DB: synthesis_queue insert generated queue_item_id: {queue_item_id}")
         if not queue_item_id:
             conn.rollback()
+            print("DEBUG_DB: add_item_to_queue rolled back (no queue_item_id).")
             return None
 
         chapters_to_insert = []
@@ -421,6 +441,7 @@ def add_item_to_queue(details: dict) -> int | None:
                 chap_detail.get('order'), # This is chapter_order for this queue item
                 chap_detail.get('text_content') # May be null
             ))
+        print(f"DEBUG_DB: chapters_to_insert for queued_chapters: {chapters_to_insert}")
 
         if chapters_to_insert:
             cursor.executemany("""
@@ -430,10 +451,12 @@ def add_item_to_queue(details: dict) -> int | None:
             """, chapters_to_insert)
 
         conn.commit()
+        print("DEBUG_DB: add_item_to_queue committed successfully.")
         return queue_item_id
     except sqlite3.Error as e:
         print(f"Database error in add_item_to_queue: {e}")
         conn.rollback()
+        print("DEBUG_DB: add_item_to_queue rolled back due to SQLite error.")
         return None
     finally:
         conn.close()
@@ -444,12 +467,14 @@ def get_queued_items() -> list:
     cursor = conn.cursor()
     queued_items_map = {}
     try:
+        print("DEBUG_DB: get_queued_items called.")
         # Fetch all queue items
         cursor.execute("""
             SELECT id, staged_book_id, book_title, source_path, synthesis_settings, status, queue_order, date_added
             FROM synthesis_queue ORDER BY queue_order ASC
         """)
         raw_queue_items = cursor.fetchall()
+        print(f"DEBUG_DB: Raw items from synthesis_queue: {raw_queue_items}")
 
         for item_row in raw_queue_items:
             item_id = item_row[0]
@@ -472,11 +497,13 @@ def get_queued_items() -> list:
             }
 
         if not queued_items_map:
+            print("DEBUG_DB: No items found in synthesis_queue table (queued_items_map is empty after initial fetch).")
             return []
 
         # Fetch all chapters and assign them to their respective queue items
         # Using IN clause to fetch chapters only for the items retrieved
         item_ids_placeholder = ','.join(['?'] * len(queued_items_map))
+        print(f"DEBUG_DB: Item IDs placeholder for chapter query: {item_ids_placeholder}")
         sql_chapters = f"""
             SELECT qc.id, qc.queue_item_id, qc.staged_chapter_id, qc.chapter_title,
                    qc.chapter_order, qc.text_content
@@ -486,6 +513,7 @@ def get_queued_items() -> list:
         """
         cursor.execute(sql_chapters, tuple(queued_items_map.keys()))
         chapters_data = cursor.fetchall()
+        print(f"DEBUG_DB: Chapters data from queued_chapters: {chapters_data}")
 
         for chap_row in chapters_data:
             queue_item_id = chap_row[1]
@@ -498,7 +526,9 @@ def get_queued_items() -> list:
                     'text_content': chap_row[5] # May be None
                 })
 
-        return list(queued_items_map.values())
+        final_list = list(queued_items_map.values())
+        print(f"DEBUG_DB: Final items returned by get_queued_items: {final_list}")
+        return final_list
 
     except sqlite3.Error as e:
         print(f"Database error in get_queued_items: {e}")
