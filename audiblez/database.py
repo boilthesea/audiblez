@@ -82,7 +82,7 @@ def create_tables(conn: sqlite3.Connection):
     # The following DROP TABLE line was causing data loss and has been removed.
     # cursor.execute("DROP TABLE IF EXISTS synthesis_queue")
     cursor.execute("""
-        CREATE TABLE synthesis_queue (
+        CREATE TABLE IF NOT EXISTS synthesis_queue (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             staged_book_id INTEGER,
             book_title TEXT NOT NULL,
@@ -99,7 +99,7 @@ def create_tables(conn: sqlite3.Connection):
     # The following DROP TABLE line was causing data loss and has been removed.
     # cursor.execute("DROP TABLE IF EXISTS queued_chapters")
     cursor.execute("""
-        CREATE TABLE queued_chapters (
+        CREATE TABLE IF NOT EXISTS queued_chapters (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             queue_item_id INTEGER NOT NULL,
             staged_chapter_id INTEGER, -- FK to staged_chapters.id if item from staging
