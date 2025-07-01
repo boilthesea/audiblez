@@ -151,23 +151,41 @@ def main(file_path, voice, pick_manually, speed, output_folder='.',
         xhtml_file_name = original_name.replace(' ', '_').replace('/', '_').replace('\\', '_')
         chapter_wav_path = Path(output_folder) / filename.replace(extension, f'_chapter_{i}_{voice}_{xhtml_file_name}.wav')
         chapter_wav_files.append(chapter_wav_path)
-        if Path(chapter_wav_path).exists():
-            print(f'File for chapter {i} already exists. Skipping')
-            stats.processed_chars += len(text)
-            if post_event:
-                post_event('CORE_CHAPTER_FINISHED', chapter_index=chapter.chapter_index)
-            continue
-        if len(text.strip()) < 10:
-            print(f'Skipping empty chapter {i}')
-            chapter_wav_files.remove(chapter_wav_path)
-            continue
+
+        # Apply filters before checking length or existence, so stats are based on filtered text length
+        # (though current stats.processed_chars uses pre-filter length if skipping)
         if i == 1:
             # add intro text
             text = f'{title} – {creator}.\n\n' + text
+
+        # Apply filters to the chapter text
+        # The default filter_file_path in apply_filters is "audiblez/filter.txt"
+        filtered_text = apply_filters(text)
+        # It might be useful to know if text changed:
+        # if filtered_text != text:
+        #    print(f"DEBUG: Filters applied to chapter {i}. Original length: {len(text)}, New length: {len(filtered_text)}")
+        # text = filtered_text # Use filtered text from here
+
+        if Path(chapter_wav_path).exists():
+            print(f'File for chapter {i} already exists. Skipping')
+            # Note: stats.processed_chars here will use original text length if we don't update 'text' var earlier
+            stats.processed_chars += len(text) # Original text length for skip consistency
+            if post_event:
+                post_event('CORE_CHAPTER_FINISHED', chapter_index=chapter.chapter_index)
+            continue
+
+        # Use filtered text for length check and processing
+        if len(filtered_text.strip()) < 10:
+            print(f'Skipping empty chapter {i} (after filtering)')
+            chapter_wav_files.remove(chapter_wav_path)
+            # Potentially add original length to processed_chars if skipping here, or adjust logic
+            # For now, skipping means it doesn't contribute to processed_chars beyond initial estimate
+            continue
+
         start_time = time.time()
         if post_event: post_event('CORE_CHAPTER_STARTED', chapter_index=chapter.chapter_index)
         audio_segments = gen_audio_segments(
-            pipeline, text, voice, speed, stats, post_event=post_event, max_sentences=max_sentences)
+            pipeline, filtered_text, voice, speed, stats, post_event=post_event, max_sentences=max_sentences)
         if audio_segments:
             final_audio = np.concatenate(audio_segments)
             soundfile.write(chapter_wav_path, final_audio, sample_rate)
@@ -412,3 +430,55 @@ def unmark(text):
     __md = Markdown(output_format="plain")
     __md.stripTopLevelTags = False
     return __md.convert(text)
+
+
+def apply_filters(text: str, filter_file_path: str = "audiblez/filter.txt") -> str:
+    """
+    Applies text replacements based on rules defined in the filter_file.
+    Each rule is pattern1,pattern2|replacement.
+    Lines starting with # are comments.
+    """
+    try:
+        if not Path(filter_file_path).exists() or os.path.getsize(filter_file_path) == 0:
+            # print(f"Filter file '{filter_file_path}' not found or empty. Skipping filtering.")
+            return text
+
+        with open(filter_file_path, 'r', encoding='utf-8') as f:
+            rules = []
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                if '|' not in line:
+                    print(f"Warning: Malformed rule in filter file (missing '|'): {line}")
+                    continue
+
+                patterns_str, replacement = line.split('|', 1)
+                patterns = [p.strip() for p in patterns_str.split(',') if p.strip()]
+                if not patterns:
+                    print(f"Warning: No patterns found for replacement '{replacement}' in rule: {line}")
+                    continue
+                rules.append({'patterns': patterns, 'replacement': replacement})
+
+        if not rules:
+            return text
+
+        # Simple approach: iterate through rules as defined in the file.
+        # For more complex scenarios, sorting rules (e.g., by pattern length descending)
+        # might be needed to prevent shorter patterns from replacing parts of longer ones prematurely.
+        # For example, if "St." is replaced before "St. Peter".
+        # However, the current list of common replacements is unlikely to cause major issues with this.
+        for rule in rules:
+            for pattern in rule['patterns']:
+                # Use re.escape to ensure patterns are treated literally,
+                # especially if they contain special regex characters.
+                # However, for simple string replacement, direct replacement is fine
+                # and might be slightly faster. If regex features are needed in patterns,
+                # this would need to be re.sub. For now, assuming literal strings.
+                text = text.replace(pattern, rule['replacement'])
+        return text
+
+    except Exception as e:
+        print(f"Error applying filters from '{filter_file_path}': {e}")
+        traceback.print_exc()
+        return text # Return original text on error
