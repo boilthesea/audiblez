@@ -439,128 +439,150 @@ def apply_filters(text: str, filter_file_path: str = "audiblez/filter.txt") -> s
     Each rule is pattern1,pattern2|replacement.
     Lines starting with # are comments.
     """
-    filter_file_name_default = "filter.txt" # The actual filename within the package or filesystem
+    filter_file_name_default = "filter.txt"  # The actual filename
 
-    # Inner function to process rules from an opened text stream
-    def _process_rules_from_stream(stream, path_for_debug_msgs):
-        nonlocal text # Allow modification of 'text' from the outer scope
+    # This inner function now correctly encapsulates rule processing from a stream.
+    def _process_rules_from_stream(stream, stream_description_for_debug):
+        nonlocal text  # Allow modification of 'text' from the apply_filters scope
         rules = []
         for i, line_content in enumerate(stream):
             line = line_content.strip()
             if not line or line.startswith('#'):
-                continue
+                continue  # Correctly inside a loop
             if '|' not in line:
-                print(f"DEBUG: Warning: Malformed rule in filter file (line {i+1} of '{path_for_debug_msgs}', missing '|'): {line}")
-                continue
+                # Corrected f-string and variable name
+                print(f"DEBUG: Warning: Malformed rule in filter file (line {i + 1} of '{stream_description_for_debug}', missing '|'): {line}")
+                continue  # Correctly inside a loop
             patterns_str, replacement = line.split('|', 1)
             patterns = [p.strip() for p in patterns_str.split(',') if p.strip()]
             if not patterns:
-                print(f"DEBUG: Warning: No patterns for replacement '{replacement}' (line {i+1} of '{path_for_debug_msgs}'): {line}")
-                continue
-            rules.append({'patterns': patterns, 'replacement': replacement, 'line_num': i+1})
+                # Corrected f-string and variable name
+                print(f"DEBUG: Warning: No patterns for replacement '{replacement}' (line {i + 1} of '{stream_description_for_debug}'): {line}")
+                continue  # Correctly inside a loop
+            rules.append({'patterns': patterns, 'replacement': replacement, 'line_num': i + 1})
 
         if not rules:
-            print(f"DEBUG: No valid filter rules found in '{path_for_debug_msgs}'.")
-            return False # No rules to apply
+            print(f"DEBUG: No valid filter rules found in '{stream_description_for_debug}'.")
+            return False  # No rules to apply
 
-        print(f"DEBUG: Loaded {len(rules)} filter rules from '{path_for_debug_msgs}'.")
+        # Corrected f-string and variable name
+        print(f"DEBUG: Loaded {len(rules)} filter rules from '{stream_description_for_debug}'.")
         text_changed_overall = False
-        for rule in rules:
-            for pattern in rule['patterns']:
+        for rule_item in rules: # Changed 'rule' to 'rule_item' to avoid conflict if 'rule' is a var name
+            for pattern in rule_item['patterns']:
                 if pattern in text:
-                    new_text = text.replace(pattern, rule['replacement'])
+                    new_text = text.replace(pattern, rule_item['replacement'])
                     if new_text != text:
-                        print(f"DEBUG: Applied rule (line {rule['line_num']} from '{path_for_debug_msgs}'): Replacing '{pattern}' with '{rule['replacement']}'.")
+                        # Corrected f-string and variable names
+                        print(f"DEBUG: Applied rule (line {rule_item['line_num']} from '{stream_description_for_debug}'): Replacing '{pattern}' with '{rule_item['replacement']}'.")
                         text = new_text
                         text_changed_overall = True
 
         if not text_changed_overall:
-            print(f"DEBUG: No changes made to the text by filtering with rules from '{path_for_debug_msgs}'.")
+            print(f"DEBUG: No changes made to the text by filtering with rules from '{stream_description_for_debug}'.")
         else:
-            print(f"DEBUG: Text was changed by filtering with rules from '{path_for_debug_msgs}'.")
+            print(f"DEBUG: Text was changed by filtering with rules from '{stream_description_for_debug}'.")
         return text_changed_overall
 
     # Main logic for apply_filters
+    # resolved_filter_path_for_debug is defined here for use in outer error messages
+    resolved_filter_path_for_debug = filter_file_path
+
     try:
-        direct_path = Path(filter_file_path)
-        # Prioritize direct path if it's explicitly provided and is a file
-        if direct_path.is_file() and (filter_file_path != f"audiblez/{filter_file_name_default}" and filter_file_path != filter_file_name_default) :
-             # ^ Heuristic: if it's not the default path string, user might intend a specific file
-            print(f"DEBUG: Attempting to use direct filter file path: '{filter_file_path}'")
-            if direct_path.exists():
-                if os.path.getsize(direct_path) == 0:
-                    print(f"DEBUG: Direct filter file '{filter_file_path}' is empty. Skipping.")
-                    return text
-                with open(direct_path, 'r', encoding='utf-8') as f_stream:
-                    _process_rules_from_stream(f_stream, str(direct_path))
+        direct_path_obj = Path(filter_file_path)
+
+        # Heuristic: if filter_file_path is not the default "audiblez/filter.txt" or "filter.txt",
+        # it's likely a user-specified custom path.
+        is_custom_path = (filter_file_path != f"audiblez/{filter_file_name_default}" and
+                          filter_file_path != filter_file_name_default)
+
+        if is_custom_path and direct_path_obj.is_file():
+            resolved_filter_path_for_debug = str(direct_path_obj)
+            print(f"DEBUG: Attempting to use user-specified direct filter file path: '{resolved_filter_path_for_debug}'")
+            if os.path.getsize(direct_path_obj) == 0:
+                print(f"DEBUG: Direct filter file '{resolved_filter_path_for_debug}' is empty. Skipping.")
                 return text
-            else:
-                print(f"DEBUG: Direct filter file path '{filter_file_path}' provided but not found. Will attempt package resource.")
+            with open(direct_path_obj, 'r', encoding='utf-8') as f_stream:
+                _process_rules_from_stream(f_stream, resolved_filter_path_for_debug)
+            return text
+        elif is_custom_path and not direct_path_obj.exists():
+            # User specified a custom path, but it doesn't exist. Don't fall back to package resource.
+            print(f"DEBUG: User-specified filter file path '{filter_file_path}' not found. Skipping filtering.")
+            return text
 
-        # Try to load from package resources (covers default case and installed package)
-        # 'audiblez' is the package name. filter_file_name_default is "filter.txt".
-        package_name = __name__.split('.')[0] # Should resolve to 'audiblez'
-        if package_name == "__main__": # If run as script, __name__ might not be package
+        # If not a custom path, or custom path wasn't a file, try package resources for the default filename.
+        package_name = __name__.split('.')[0]
+        if package_name == "__main__" or package_name == "core": # Handle if run as script or __name__ is just 'core'
             package_name = "audiblez"
-            print(f"DEBUG: __name__ is __main__, trying package_name '{package_name}' for resources.")
+            print(f"DEBUG: __name__ is '{__name__}', adjusted package_name to '{package_name}' for resources.")
 
-
+        resolved_filter_path_for_debug = f"package resource '{package_name}/{filter_file_name_default}'"
         print(f"DEBUG: Attempting to load filter '{filter_file_name_default}' from package '{package_name}' via importlib.resources.")
+
+        resource_found_and_processed = False
         try:
-            # Prefer importlib.resources.files for Py3.9+
             if hasattr(importlib.resources, 'files') and hasattr(importlib.resources.files(package_name), 'joinpath'):
-                resource_file_path = importlib.resources.files(package_name).joinpath(filter_file_name_default)
-                if resource_file_path.is_file():
-                    # Check size before opening
-                    # Note: .stat().st_size might be needed if os.path.getsize doesn't work on TraversablePath
+                resource_file_traversable = importlib.resources.files(package_name).joinpath(filter_file_name_default)
+                if resource_file_traversable.is_file():
+                    resolved_filter_path_for_debug = str(resource_file_traversable) # More specific path
                     try:
-                        file_size = resource_file_path.stat().st_size
-                    except Exception: # Broad catch as stat() might not be fully implemented on all Traversable
-                        file_size = -1 # Indicate unknown size, proceed to open and check rules
-                        print(f"DEBUG: Could not determine size of resource '{str(resource_file_path)}' beforehand.")
+                        file_size = resource_file_traversable.stat().st_size
+                        if file_size == 0:
+                            print(f"DEBUG: Package resource filter file '{resolved_filter_path_for_debug}' is empty. Skipping.")
+                            return text
+                    except Exception:
+                        print(f"DEBUG: Could not determine size of resource '{resolved_filter_path_for_debug}' beforehand via .stat().")
 
-                    if file_size == 0:
-                        print(f"DEBUG: Package resource filter file '{str(resource_file_path)}' is empty. Skipping.")
-                        return text
-
-                    with resource_file_path.open('r', encoding='utf-8') as f_stream:
-                        _process_rules_from_stream(f_stream, f"package resource '{package_name}/{filter_file_name_default}'")
+                    with resource_file_traversable.open('r', encoding='utf-8') as f_stream:
+                        _process_rules_from_stream(f_stream, resolved_filter_path_for_debug)
+                    resource_found_and_processed = True
                 else:
                     print(f"DEBUG: Filter file '{filter_file_name_default}' not found as a file in package '{package_name}' using importlib.resources.files().")
-            # Fallback for Py < 3.9 or if .files() API isn't suitable (e.g. zip-installed)
-            # importlib.resources.open_text is generally robust.
-            elif hasattr(importlib.resources, 'open_text'):
-                 with importlib.resources.open_text(package_name, filter_file_name_default, encoding='utf-8') as f_stream:
-                    # We can't easily check size of a stream from open_text without reading it.
-                    # _process_rules_from_stream will handle if it's effectively empty (no rules).
-                    _process_rules_from_stream(f_stream, f"package resource '{package_name}/{filter_file_name_default}'")
-            else:
-                print("DEBUG: Suitable importlib.resources API not found (neither .files() nor .open_text()).")
-                # As a last resort, try the original filter_file_path if it was the default "audiblez/filter.txt"
-                # This might catch cases where it's run from source root and importlib.resources has issues.
-                if Path(f"audiblez/{filter_file_name_default}").is_file():
-                    print(f"DEBUG: Last resort: attempting to read '{f\"audiblez/{filter_file_name_default}\"}' as a relative path.")
-                    if os.path.getsize(f"audiblez/{filter_file_name_default}") == 0:
-                         print(f"DEBUG: Last resort filter file '{f\"audiblez/{filter_file_name_default}\"}' is empty. Skipping.")
+
+            if not resource_found_and_processed and hasattr(importlib.resources, 'open_text'):
+                # Fallback for older Pythons or if .files() didn't find it / wasn't suitable
+                resolved_filter_path_for_debug = f"package resource '{package_name}/{filter_file_name_default}' (via open_text)"
+                with importlib.resources.open_text(package_name, filter_file_name_default, encoding='utf-8') as f_stream:
+                    _process_rules_from_stream(f_stream, resolved_filter_path_for_debug)
+                resource_found_and_processed = True
+
+            if not resource_found_and_processed:
+                # This block might be reached if no suitable importlib.resources API was found or worked.
+                # Last resort: try relative path for running from source root.
+                # This is now less likely to be needed due to more robust importlib.resources handling.
+                fallback_path_str = f"audiblez/{filter_file_name_default}"
+                fallback_path_obj = Path(fallback_path_str)
+                if fallback_path_obj.is_file():
+                    resolved_filter_path_for_debug = fallback_path_str
+                    print(f"DEBUG: Last resort: attempting to read '{resolved_filter_path_for_debug}' as a relative path.")
+                    if os.path.getsize(fallback_path_obj) == 0:
+                         print(f"DEBUG: Last resort filter file '{resolved_filter_path_for_debug}' is empty. Skipping.")
                          return text
-                    with open(f"audiblez/{filter_file_name_default}", 'r', encoding='utf-8') as f_stream:
-                        _process_rules_from_stream(f_stream, f"relative path 'audiblez/{filter_file_name_default}'")
+                    with open(fallback_path_obj, 'r', encoding='utf-8') as f_stream:
+                        _process_rules_from_stream(f_stream, resolved_filter_path_for_debug)
+                    resource_found_and_processed = True
                 else:
-                    print(f"DEBUG: Filter file also not found at relative path 'audiblez/{filter_file_name_default}'.")
+                     print(f"DEBUG: Filter file also not found at last resort relative path '{fallback_path_str}'.")
+
+            if not resource_found_and_processed:
+                 print(f"DEBUG: Filter file '{filter_file_name_default}' could not be loaded from any source. Skipping filtering.")
+
             return text # Text is modified in-place by _process_rules_from_stream via nonlocal
 
         except FileNotFoundError:
             print(f"DEBUG: Filter file '{filter_file_name_default}' not found in package '{package_name}' via importlib.resources. Skipping filtering.")
         except ModuleNotFoundError:
-            print(f"DEBUG: Package '{package_name}' not found for importlib.resources. This shouldn't happen if 'audiblez' is installed. Skipping filtering.")
+            print(f"DEBUG: Package '{package_name}' not found by importlib.resources. Skipping filtering.")
         except Exception as e_pkg:
+            # Corrected f-string
             print(f"DEBUG: Error loading filter file from package '{package_name}' via importlib.resources: {e_pkg}")
             traceback.print_exc()
 
-        return text # Return text, possibly modified
+        return text
 
     except Exception as e_outer:
-        print(f"ERROR: Outer error in apply_filters (path: '{filter_file_path}'): {e_outer}")
+        # Corrected f-string, using the most up-to-date path string for debug
+        print(f"ERROR: Outer error in apply_filters (attempted path: '{resolved_filter_path_for_debug}'): {e_outer}")
                 if not line or line.startswith('#'):
                     continue # Skip empty lines and comments
                 if '|' not in line:
