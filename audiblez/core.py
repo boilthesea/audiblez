@@ -438,47 +438,70 @@ def apply_filters(text: str, filter_file_path: str = "audiblez/filter.txt") -> s
     Each rule is pattern1,pattern2|replacement.
     Lines starting with # are comments.
     """
+    print(f"DEBUG: apply_filters called for filter file: '{filter_file_path}'")
+    original_text_for_debug = text[:500] # For brief comparison if text changes
+
     try:
-        if not Path(filter_file_path).exists() or os.path.getsize(filter_file_path) == 0:
-            # print(f"Filter file '{filter_file_path}' not found or empty. Skipping filtering.")
+        filter_file = Path(filter_file_path)
+        if not filter_file.exists():
+            print(f"DEBUG: Filter file '{filter_file_path}' not found. Skipping filtering.")
+            return text
+        if os.path.getsize(filter_file_path) == 0:
+            print(f"DEBUG: Filter file '{filter_file_path}' is empty. Skipping filtering.")
             return text
 
+        rules = []
         with open(filter_file_path, 'r', encoding='utf-8') as f:
-            rules = []
-            for line in f:
-                line = line.strip()
+            for i, line_content in enumerate(f):
+                line = line_content.strip()
                 if not line or line.startswith('#'):
-                    continue
+                    continue # Skip empty lines and comments
                 if '|' not in line:
-                    print(f"Warning: Malformed rule in filter file (missing '|'): {line}")
+                    print(f"DEBUG: Warning: Malformed rule in filter file (line {i+1}, missing '|'): {line}")
                     continue
 
                 patterns_str, replacement = line.split('|', 1)
                 patterns = [p.strip() for p in patterns_str.split(',') if p.strip()]
                 if not patterns:
-                    print(f"Warning: No patterns found for replacement '{replacement}' in rule: {line}")
+                    print(f"DEBUG: Warning: No patterns found for replacement '{replacement}' in rule (line {i+1}): {line}")
                     continue
-                rules.append({'patterns': patterns, 'replacement': replacement})
+                rules.append({'patterns': patterns, 'replacement': replacement, 'line_num': i+1})
 
         if not rules:
+            print(f"DEBUG: No valid filter rules found in '{filter_file_path}'. Skipping filtering.")
             return text
 
-        # Simple approach: iterate through rules as defined in the file.
-        # For more complex scenarios, sorting rules (e.g., by pattern length descending)
-        # might be needed to prevent shorter patterns from replacing parts of longer ones prematurely.
-        # For example, if "St." is replaced before "St. Peter".
-        # However, the current list of common replacements is unlikely to cause major issues with this.
+        print(f"DEBUG: Loaded {len(rules)} filter rules from '{filter_file_path}'.")
+        text_changed_overall = False
         for rule in rules:
+            rule_applied_this_iteration = False
             for pattern in rule['patterns']:
-                # Use re.escape to ensure patterns are treated literally,
-                # especially if they contain special regex characters.
-                # However, for simple string replacement, direct replacement is fine
-                # and might be slightly faster. If regex features are needed in patterns,
-                # this would need to be re.sub. For now, assuming literal strings.
-                text = text.replace(pattern, rule['replacement'])
+                if pattern in text:
+                    new_text = text.replace(pattern, rule['replacement'])
+                    if new_text != text:
+                        print(f"DEBUG: Applied rule (line {rule['line_num']}): Replacing '{pattern}' with '{rule['replacement']}'.")
+                        text = new_text
+                        text_changed_overall = True
+                        rule_applied_this_iteration = True
+                    # else:
+                        # This case (pattern in text but text.replace results in no change)
+                        # is unlikely for distinct pattern/replacement, but could happen if replacement is same as pattern.
+                        # print(f"DEBUG: Pattern '{pattern}' found, but replacement with '{rule['replacement']}' resulted in no change.")
+                # else:
+                    # print(f"DEBUG: Pattern '{pattern}' from rule (line {rule['line_num']}) not found in current text.")
+            # if rule_applied_this_iteration:
+                # print(f"DEBUG: Text after applying rule (line {rule['line_num']}) (first 500 chars): {text[:500]}")
+
+
+        if text_changed_overall:
+            print(f"DEBUG: Filtering applied. Original text (first 500 chars): '{original_text_for_debug}'")
+            print(f"DEBUG: Filtered text (first 500 chars): '{text[:500]}'")
+        else:
+            print("DEBUG: No changes made to the text by filtering.")
+
         return text
 
     except Exception as e:
-        print(f"Error applying filters from '{filter_file_path}': {e}")
+        print(f"ERROR: Error applying filters from '{filter_file_path}': {e}")
         traceback.print_exc()
         return text # Return original text on error
