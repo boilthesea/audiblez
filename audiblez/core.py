@@ -584,3 +584,277 @@ def apply_filters(text: str, filter_file_path: str = "audiblez/filter.txt") -> s
     except Exception as e_outer:
         # Corrected f-string, using the most up-to-date path string for debug
         print(f"ERROR: Outer error in apply_filters (attempted path: '{resolved_filter_path_for_debug}'): {e_outer}")
+
+
+def get_calibre_ebook_convert_path(ui_callback_for_path_selection=None) -> str | None:
+    """
+    Finds the path to Calibre's ebook-convert executable.
+    1. Checks the system PATH.
+    2. Checks a stored path in the database.
+    3. If not found, and ui_callback_for_path_selection is provided, calls it to ask the user.
+    """
+    # Try finding in PATH first
+    ebook_convert_path = shutil.which("ebook-convert")
+    if ebook_convert_path:
+        # Further validation: check if calibre-debug is in the same directory
+        # This helps confirm it's a full Calibre installation.
+        calibre_dir = Path(ebook_convert_path).parent
+        debug_exe_name = "calibre-debug.exe" if platform.system() == "Windows" else "calibre-debug"
+        if (calibre_dir / debug_exe_name).exists():
+            print(f"Found ebook-convert in PATH and validated: {ebook_convert_path}")
+            return ebook_convert_path
+        else:
+            print(f"Found ebook-convert in PATH ({ebook_convert_path}), but {debug_exe_name} missing in parent directory. Will check DB/prompt.")
+
+    # Try loading from database
+    from audiblez.database import load_user_setting, save_user_setting # Local import
+    stored_path_str = load_user_setting('calibre_ebook_convert_path')
+    if stored_path_str:
+        stored_path = Path(stored_path_str)
+        calibre_dir = stored_path.parent
+        debug_exe_name = "calibre-debug.exe" if platform.system() == "Windows" else "calibre-debug"
+        if stored_path.exists() and stored_path.is_file() and (calibre_dir / debug_exe_name).exists():
+            print(f"Using validated Calibre path from database: {stored_path_str}")
+            return str(stored_path)
+        else:
+            print(f"Stored Calibre path '{stored_path_str}' is invalid or incomplete. Ignoring.")
+            save_user_setting('calibre_ebook_convert_path', None) # Clear invalid path
+
+    # If not found and callback is provided, ask the user
+    if ui_callback_for_path_selection:
+        print("Calibre 'ebook-convert' not found in PATH or DB. Prompting user for Calibre directory.")
+        user_selected_calibre_dir_str = ui_callback_for_path_selection()
+        if user_selected_calibre_dir_str:
+            user_selected_calibre_dir = Path(user_selected_calibre_dir_str)
+            # Common locations for ebook-convert within a Calibre installation directory
+            possible_locations = [
+                user_selected_calibre_dir / "ebook-convert",
+                user_selected_calibre_dir / "Calibre2" / "ebook-convert" # Windows common structure
+            ]
+            if platform.system() == "Windows":
+                possible_locations = [
+                    user_selected_calibre_dir / "ebook-convert.exe",
+                    user_selected_calibre_dir / "Calibre2" / "ebook-convert.exe"
+                ]
+
+            found_path = None
+            for loc in possible_locations:
+                debug_exe_name = "calibre-debug.exe" if platform.system() == "Windows" else "calibre-debug"
+                calibre_parent_dir = loc.parent
+                if loc.exists() and loc.is_file() and (calibre_parent_dir / debug_exe_name).exists():
+                    found_path = str(loc)
+                    print(f"User selected Calibre directory. Validated ebook-convert at: {found_path}")
+                    save_user_setting('calibre_ebook_convert_path', found_path)
+                    return found_path
+
+            if not found_path:
+                 # Check if ebook-convert is directly in the selected folder, even if calibre-debug isn't (less strict)
+                potential_exe = user_selected_calibre_dir / ("ebook-convert.exe" if platform.system() == "Windows" else "ebook-convert")
+                if potential_exe.exists() and potential_exe.is_file():
+                    print(f"User selected Calibre directory. Found ebook-convert at: {potential_exe}, but validation with calibre-debug failed. Using it anyway.")
+                    save_user_setting('calibre_ebook_convert_path', str(potential_exe))
+                    return str(potential_exe)
+
+                print(f"ebook-convert or calibre-debug not found in the selected directory or common subdirectories: {user_selected_calibre_dir_str}")
+                # wx.CallAfter(wx.MessageBox, f"Could not find 'ebook-convert' and 'calibre-debug' in the selected directory:\n{user_selected_calibre_dir_str}\nPlease ensure you select the main Calibre application folder.", "Calibre Verification Failed", wx.OK | wx.ICON_ERROR)
+                # The UI callback should handle user feedback for this case.
+                return None
+    else:
+        print("Calibre 'ebook-convert' not found in PATH or DB. No UI callback provided to ask user.")
+
+    return None
+
+
+def convert_ebook_with_calibre(input_ebook_path: str, output_html_dir: str, ui_callback_for_path_selection=None) -> str | None:
+    """
+    Converts an ebook to HTML using Calibre's ebook-convert.
+
+    Args:
+        input_ebook_path (str): Path to the input ebook file.
+        output_html_dir (str): Directory where the HTML output should be saved.
+                               The actual HTML file will be named 'output.html' inside this dir.
+        ui_callback_for_path_selection: Function to call if Calibre path needs user selection.
+
+    Returns:
+        str | None: Path to the generated HTML file if successful, None otherwise.
+    """
+    ebook_convert_exe = get_calibre_ebook_convert_path(ui_callback_for_path_selection)
+    if not ebook_convert_exe:
+        print("ERROR: Calibre's ebook-convert command not found. Cannot convert ebook.")
+        # UI should have already shown an error from get_calibre_ebook_convert_path if it prompted.
+        return None
+
+    input_path = Path(input_ebook_path)
+    if not input_path.exists() or not input_path.is_file():
+        print(f"ERROR: Input ebook file not found: {input_ebook_path}")
+        return None
+
+    output_dir = Path(output_html_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    # Define a predictable output HTML filename within the output_html_dir
+    output_html_file = output_dir / "output.html"
+
+    # ebook-convert options:
+    # --enable-heuristics: Useful for some conversions.
+    # --keep-ligatures: Preserves ligatures.
+    # --smarten-punctuation: Converts plain quotes, dashes, and ellipsis to typographic equivalents.
+    # Consider adding more options as needed, e.g., for TOC generation, font embedding, etc.
+    # For now, a basic conversion to HTML.
+    # The output format is determined by the extension of the output file.
+    # So, `output.html` implies HTML conversion.
+    # Calibre might output a single HTML file or multiple files (e.g., for chapters)
+    # depending on the input format and its internal logic.
+    # Using a single output.html file is simpler to start with.
+    # If Calibre splits it, we might need to find the main index file or process all HTML files.
+
+    command = [
+        ebook_convert_exe,
+        str(input_path),
+        str(output_html_file),
+        # Example options (can be customized or made configurable):
+        # "--enable-heuristics",
+        # "--smarten-punctuation",
+        # "--output-profile=tablet", # Generic profile
+    ]
+
+    print(f"Running Calibre conversion: {' '.join(command)}")
+    try:
+        # Using subprocess.run with capture_output=True to get stdout/stderr
+        # Timeout can be added if conversions might hang indefinitely.
+        result = subprocess.run(command, capture_output=True, text=True, check=False, encoding='utf-8')
+
+        if result.returncode == 0:
+            print(f"Calibre conversion successful. Output HTML: {output_html_file}")
+            if output_html_file.exists():
+                return str(output_html_file)
+            else:
+                # This case should be rare if returncode is 0, but good to check.
+                print(f"ERROR: Calibre reported success, but output file '{output_html_file}' not found.")
+                print(f"Calibre stdout:\n{result.stdout}")
+                print(f"Calibre stderr:\n{result.stderr}")
+                return None
+        else:
+            print(f"ERROR: Calibre ebook-convert failed with return code {result.returncode}")
+            print(f"Calibre stdout:\n{result.stdout}")
+            print(f"Calibre stderr:\n{result.stderr}")
+            # Potentially clean up output_html_file if it was created but is incomplete/invalid
+            if output_html_file.exists():
+                try:
+                    output_html_file.unlink()
+                except OSError as e:
+                    print(f"Warning: Could not delete incomplete output file '{output_html_file}': {e}")
+            return None
+
+    except FileNotFoundError:
+        # This would happen if ebook_convert_exe path was somehow invalid despite earlier checks.
+        print(f"ERROR: ebook-convert executable not found at '{ebook_convert_exe}'. This shouldn't happen if get_calibre_ebook_convert_path worked.")
+        return None
+    except subprocess.TimeoutExpired:
+        print("ERROR: Calibre conversion timed out.")
+        return None
+    except Exception as e:
+        print(f"ERROR: An unexpected error occurred during Calibre conversion: {e}")
+        traceback.print_exc()
+        return None
+
+
+def extract_chapters_from_calibre_html(html_file_path: str) -> list:
+    """
+    Parses an HTML file (presumably generated by Calibre) and extracts chapters.
+    Chapters are identified by h1 or h2 tags.
+    """
+    chapters = []
+    current_chapter_title = "Introduction" # Default for content before the first heading
+    current_chapter_content = []
+    chapter_index_counter = 0
+
+    try:
+        with open(html_file_path, 'r', encoding='utf-8') as f:
+            soup = BeautifulSoup(f, 'html.parser') # Using html.parser, can switch to lxml if needed
+
+        # Try to get the main book title from <title> tag or first prominent <h1>
+        book_title_tag = soup.find('title')
+        book_overall_title = book_title_tag.string.strip() if book_title_tag else "Untitled Book"
+
+        # Heuristic: Content often resides in <body> or a main <div role="main"> or <article>
+        # For simplicity, we'll process all relevant tags within body.
+        content_body = soup.body if soup.body else soup
+
+        if not content_body:
+            print(f"Warning: Could not find <body> or main content in {html_file_path}. No chapters extracted.")
+            return []
+
+        # Relevant tags for content extraction, similar to EPUB processing
+        # but chapters are delimited by h1/h2 in the flow of these tags.
+        content_tags = ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'div'] # Added div for more general content blocks
+
+        def create_chapter_object(title, text_content, index):
+            chapter_obj = SimpleNamespace()
+            chapter_obj.title = title # Used by core.main for file naming if get_name() not present
+            chapter_obj.short_name = title.replace('/', '_').replace('\\', '_') # For UI display & internal use
+            chapter_obj.extracted_text = text_content.strip()
+            chapter_obj.is_selected = True  # Default to selected
+            chapter_obj.chapter_index = index # For UI events and ordering
+            # Mimic EbookLib item methods if needed by other parts of the code, e.g. get_name()
+            chapter_obj.get_name = lambda: title # Simple mock
+            chapter_obj.get_type = lambda: "calibre_html_chapter" # Dummy type
+            return chapter_obj
+
+        for element in content_body.find_all(True, recursive=True): # Iterate over all tags
+            # Chapter demarcation: h1 or h2
+            if element.name in ['h1', 'h2']:
+                # If there's existing content, save it as the previous chapter
+                if current_chapter_content:
+                    text_for_prev_chapter = '\n'.join(current_chapter_content).strip()
+                    if text_for_prev_chapter: # Only add if there's actual text
+                        chapters.append(create_chapter_object(current_chapter_title, text_for_prev_chapter, chapter_index_counter))
+                        chapter_index_counter += 1
+                    current_chapter_content = [] # Reset for the new chapter
+
+                new_chapter_title = element.get_text(separator=' ', strip=True)
+                if new_chapter_title: # Only update if title is non-empty
+                    current_chapter_title = new_chapter_title
+                # Don't add the heading itself to chapter content if it's used as title
+                continue # Move to next element
+
+            # Content extraction from allowed tags
+            if element.name in content_tags:
+                # Heuristic: Avoid extracting text from divs that are just containers for other block elements
+                # or from divs that seem like navigation, headers, footers. This is complex.
+                # A simple check: if a div has other block elements as direct children, maybe skip its direct text.
+                # For now, keep it simple: extract text from all specified content_tags.
+                # Consider more specific class/id checks if Calibre output is consistent.
+
+                text = element.get_text(separator=' ', strip=True)
+                if text:
+                    # Basic sentence-ending punctuation for consistency, if not already present
+                    if not text.endswith(('.', '!', '?', ':', ';')):
+                        text += '.'
+                    current_chapter_content.append(text)
+
+        # Add the last accumulated chapter
+        if current_chapter_content:
+            text_for_last_chapter = '\n'.join(current_chapter_content).strip()
+            if text_for_last_chapter:
+                chapters.append(create_chapter_object(current_chapter_title, text_for_last_chapter, chapter_index_counter))
+
+        # If no chapters were found (e.g. no h1/h2 tags), treat the whole content as one chapter
+        if not chapters and content_body:
+            all_text = content_body.get_text(separator='\n', strip=True)
+            if all_text:
+                chapters.append(create_chapter_object(book_overall_title or "Full Text", all_text, 0))
+
+        print(f"Extracted {len(chapters)} chapters from Calibre HTML output.")
+        # For debugging, print chapter titles and lengths
+        # for chap in chapters:
+        #    print(f"  - Title: {chap.short_name}, Length: {len(chap.extracted_text)}")
+
+        return chapters
+
+    except FileNotFoundError:
+        print(f"ERROR: HTML file not found for chapter extraction: {html_file_path}")
+        return []
+    except Exception as e:
+        print(f"ERROR: Failed to parse or extract chapters from HTML file '{html_file_path}': {e}")
+        traceback.print_exc()
+        return []

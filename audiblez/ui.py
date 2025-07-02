@@ -289,6 +289,11 @@ class MainWindow(wx.Frame):
         open_epub_button.Bind(wx.EVT_BUTTON, self.on_open)
         top_sizer.Add(open_epub_button, 0, wx.ALL, 5)
 
+        # Open with Calibre button
+        open_calibre_button = wx.Button(top_panel, label="📖 Open with Calibre")
+        open_calibre_button.Bind(wx.EVT_BUTTON, self.on_open_with_calibre)
+        top_sizer.Add(open_calibre_button, 0, wx.ALL, 5)
+
         # Open Markdown .md
         # open_md_button = wx.Button(top_panel, label="📁 Open Markdown (.md)")
         # open_md_button.Bind(wx.EVT_BUTTON, self.on_open)
@@ -1600,6 +1605,156 @@ class MainWindow(wx.Frame):
                 wx.MessageBox("Audiobook synthesis is still in progress. Please wait for it to finish.", "Audiobook Synthesis in Progress")
             else:
                 wx.CallAfter(self.open_epub, file_path)
+
+    def on_open_with_calibre(self, event):
+        # Placeholder for Calibre opening logic
+        # This will eventually call core functions to find Calibre,
+        # convert the book, and then process it like an EPUB.
+        wx.MessageBox("Calibre integration is under development.", "Coming Soon", wx.OK | wx.ICON_INFORMATION)
+        # Example of what it might do:
+        # with wx.FileDialog(self, "Open Ebook with Calibre",
+        #                    wildcard="Ebook files (*.epub;*.mobi;*.azw3)|*.epub;*.mobi;*.azw3|All files (*.*)|*.*",
+        #                    style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST) as dialog:
+        #     if dialog.ShowModal() == wx.ID_CANCEL:
+        #         return
+        #     file_path = dialog.GetPath()
+        #     if not file_path:
+        #         return
+        #     if self.synthesis_in_progress:
+        #         wx.MessageBox("Audiobook synthesis is still in progress. Please wait for it to finish.", "Audiobook Synthesis in Progress")
+        #     else:
+        #         # wx.CallAfter(self.process_with_calibre, file_path) # self.process_with_calibre will be new method
+        #         print(f"File selected for Calibre processing: {file_path}")
+
+        # Import necessary core functions and modules
+        from audiblez.core import get_calibre_ebook_convert_path, convert_ebook_with_calibre, extract_chapters_from_calibre_html
+        import tempfile
+        import shutil
+
+        # Define the callback for asking user for Calibre path (if needed by core functions)
+        def ask_user_for_calibre_path_gui():
+            with wx.DirDialog(self, "Select Calibre Installation Directory",
+                               style=wx.DD_DEFAULT_STYLE | wx.DD_DIR_MUST_EXIST) as dirDialog:
+                if dirDialog.ShowModal() == wx.ID_CANCEL:
+                    return None # User cancelled
+                return dirDialog.GetPath()
+
+        # 1. Prompt user to select an ebook file
+        # Allow various ebook formats Calibre can handle
+        wildcard_str = "Ebook files (*.epub;*.mobi;*.azw;*.azw3;*.fb2;*.lit;*.pdf)|*.epub;*.mobi;*.azw;*.azw3;*.fb2;*.lit;*.pdf|All files (*.*)|*.*"
+        with wx.FileDialog(self, "Open Ebook with Calibre", wildcard=wildcard_str,
+                           style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST) as dialog:
+            if dialog.ShowModal() == wx.ID_CANCEL:
+                return # User cancelled file selection
+            input_ebook_path = dialog.GetPath()
+
+        if not input_ebook_path:
+            return
+
+        if self.synthesis_in_progress:
+            wx.MessageBox("Audiobook synthesis is in progress. Please wait for it to finish.",
+                          "Synthesis Busy", wx.OK | wx.ICON_WARNING)
+            return
+
+        # 2. Create a temporary directory for HTML output
+        temp_html_output_dir = tempfile.mkdtemp(prefix="audiblez_calibre_")
+        print(f"Temporary directory for Calibre HTML output: {temp_html_output_dir}")
+
+        try:
+            # Call core.convert_ebook_with_calibre
+            # Pass the GUI callback for Calibre path selection if needed
+            wx.BeginBusyCursor() # Indicate processing
+            html_file_path = convert_ebook_with_calibre(input_ebook_path, temp_html_output_dir,
+                                                        ui_callback_for_path_selection=ask_user_for_calibre_path_gui)
+            wx.EndBusyCursor()
+
+            if not html_file_path:
+                wx.MessageBox(f"Failed to convert '{Path(input_ebook_path).name}' using Calibre. Check console for errors.",
+                              "Calibre Conversion Failed", wx.OK | wx.ICON_ERROR)
+                return # Conversion failed
+
+            # 3. If conversion is successful, call core.extract_chapters_from_calibre_html
+            wx.BeginBusyCursor()
+            # This function returns a list of SimpleNamespace chapter objects
+            extracted_chapters = extract_chapters_from_calibre_html(html_file_path)
+            wx.EndBusyCursor()
+
+            if not extracted_chapters:
+                wx.MessageBox(f"Could not extract chapters from the HTML output of '{Path(input_ebook_path).name}'. The book might be empty or in an unexpected format.",
+                              "Chapter Extraction Failed", wx.OK | wx.ICON_WARNING)
+                return
+
+            # 4. Adapt UI population logic
+            # Cleanup previous dynamic UI parts
+            if hasattr(self, 'splitter_left') and self.splitter_left: self.splitter_left.Destroy()
+            if hasattr(self, 'splitter_right') and self.splitter_right: self.splitter_right.Destroy()
+            self.splitter_left, self.splitter_right = None, None
+
+
+            self.selected_file_path = input_ebook_path # Store original ebook path for reference
+
+            # Try to get a sensible book title: from HTML, or fallback to filename
+            # extract_chapters_from_calibre_html might have a chapter titled with book title if no H1/H2 found.
+            # Or, we can parse the <title> from the HTML file directly here if needed, but core function already does.
+            # For simplicity, if chapters were extracted, the first chapter's title or a generic one is used by core.
+            # If there's only one chapter, its title is likely the book's title or "Full Text".
+            if extracted_chapters:
+                 # Heuristic: if the first chapter is named "Introduction" and there are others,
+                 # try to use the filename as title. Otherwise, the first chapter name might be the book title.
+                if len(extracted_chapters) == 1 and extracted_chapters[0].short_name not in ["Introduction", "Full Text"]:
+                    self.selected_book_title = extracted_chapters[0].short_name
+                elif extracted_chapters[0].short_name == "Introduction" and len(extracted_chapters) > 1:
+                     self.selected_book_title = Path(input_ebook_path).stem # Filename without extension
+                elif extracted_chapters[0].short_name != "Full Text": # Default if no better heuristic
+                    self.selected_book_title = extracted_chapters[0].short_name
+                else: # Fallback
+                    self.selected_book_title = Path(input_ebook_path).stem
+            else: # Should not happen if we check extracted_chapters above
+                self.selected_book_title = Path(input_ebook_path).stem
+
+            self.selected_book_author = "Unknown (Calibre Import)" # Calibre HTML doesn't easily provide author
+            self.selected_book = None # No ebooklib 'book' object for HTML
+
+            self.document_chapters = extracted_chapters # These are now SimpleNamespace objects
+
+            # For Calibre imports, all extracted chapters are initially "good"
+            self.good_chapters_list = list(self.document_chapters)
+
+            if self.document_chapters:
+                self.selected_chapter = self.document_chapters[0]
+            else:
+                self.selected_chapter = None
+
+            # Ensure chapter objects have `is_selected` (already done by extract_chapters_from_calibre_html)
+            # and `short_name` (also done)
+
+            self.create_notebook_and_tabs() # Ensure notebook structure exists
+            self.create_layout_for_ebook(self.splitter) # Populate UI
+
+            # Update Cover - For HTML imports, there's no direct cover object.
+            # We could try to find an <img> tag in the HTML, or just leave it blank.
+            if hasattr(self, 'cover_bitmap'):
+                self.cover_bitmap.SetBitmap(wx.NullBitmap) # Clear old cover
+
+            self.refresh_staging_tab()
+            self.refresh_queue_tab()
+            self.splitter.Layout()
+            self.Layout()
+
+            wx.MessageBox(f"Successfully processed '{self.selected_book_title}' using Calibre.",
+                          "Processing Complete", wx.OK | wx.ICON_INFORMATION)
+
+        finally:
+            # 5. Clean up the temporary HTML output directory
+            if Path(temp_html_output_dir).exists():
+                try:
+                    shutil.rmtree(temp_html_output_dir)
+                    print(f"Cleaned up temporary directory: {temp_html_output_dir}")
+                except Exception as e:
+                    print(f"Error cleaning up temporary directory {temp_html_output_dir}: {e}")
+            if wx.IsBusy(): # Ensure cursor is reset if an error occurred mid-process
+                wx.EndBusyCursor()
+
 
     def on_exit(self, event):
         self.Close()
