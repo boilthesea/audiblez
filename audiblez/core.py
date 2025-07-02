@@ -27,6 +27,7 @@ from kokoro import KPipeline
 from ebooklib import epub
 from pick import pick
 import importlib.resources # Added for accessing package data files
+import markdown # Added for unmark function
 
 from audiblez.database import load_user_setting # Added
 
@@ -427,8 +428,8 @@ def unmark_element(element, stream=None):
 
 def unmark(text):
     """Unmark markdown text"""
-    Markdown.output_formats["plain"] = unmark_element  # patching Markdown
-    __md = Markdown(output_format="plain")
+    markdown.Markdown.output_formats["plain"] = unmark_element  # patching Markdown
+    __md = markdown.Markdown(output_format="plain")
     __md.stripTopLevelTags = False
     return __md.convert(text)
 
@@ -583,44 +584,3 @@ def apply_filters(text: str, filter_file_path: str = "audiblez/filter.txt") -> s
     except Exception as e_outer:
         # Corrected f-string, using the most up-to-date path string for debug
         print(f"ERROR: Outer error in apply_filters (attempted path: '{resolved_filter_path_for_debug}'): {e_outer}")
-                if not line or line.startswith('#'):
-                    continue # Skip empty lines and comments
-                if '|' not in line:
-                    print(f"DEBUG: Warning: Malformed rule in filter file (line {i+1}, missing '|'): {line}")
-                    continue
-
-                patterns_str, replacement = line.split('|', 1)
-                patterns = [p.strip() for p in patterns_str.split(',') if p.strip()]
-                if not patterns:
-                    print(f"DEBUG: Warning: No patterns found for replacement '{replacement}' in rule (line {i+1}): {line}")
-                    continue
-                rules.append({'patterns': patterns, 'replacement': replacement, 'line_num': i+1})
-
-        if not rules:
-            print(f"DEBUG: No valid filter rules found in '{resolved_filter_path_for_debug}'. Skipping filtering.")
-            return text
-
-        print(f"DEBUG: Loaded {len(rules)} filter rules from '{resolved_filter_path_for_debug}'.")
-        text_changed_overall = False
-        for rule in rules:
-            # rule_applied_this_iteration = False # Not currently used
-            for pattern in rule['patterns']:
-                if pattern in text:
-                    new_text = text.replace(pattern, rule['replacement'])
-                    if new_text != text:
-                        print(f"DEBUG: Applied rule (line {rule['line_num']}): Replacing '{pattern}' with '{rule['replacement']}'.")
-                        text = new_text
-                        text_changed_overall = True
-                        # rule_applied_this_iteration = True # Not currently used
-
-        if not text_changed_overall:
-            print("DEBUG: No changes made to the text by filtering (though rules may have been loaded).")
-        else:
-            print("DEBUG: Text was changed by filtering.")
-
-        return text
-
-    except Exception as e:
-        print(f"ERROR: Error applying filters from '{resolved_filter_path_for_debug}': {e}")
-        traceback.print_exc()
-        return text # Return original text on error
