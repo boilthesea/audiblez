@@ -857,43 +857,43 @@ def extract_chapters_from_calibre_html(html_file_path: str) -> list:
             chapter_obj.get_type = lambda: "calibre_html_chapter" # Dummy type
             return chapter_obj
 
-        for element in content_body.find_all(True, recursive=True): # Iterate over all tags
+        # Iterate through direct children of the content body to better control chapter segmentation
+        for element in content_body.find_all(recursive=False):
+            if not hasattr(element, 'name') or not element.name: # Skip NavigableStrings, comments, etc.
+                continue
+
             # Chapter demarcation: h1 or h2
             if element.name in ['h1', 'h2']:
                 # If there's existing content, save it as the previous chapter
                 if current_chapter_content:
                     text_for_prev_chapter = '\n'.join(current_chapter_content).strip()
-                    if text_for_prev_chapter: # Only add if there's actual text
+                    if text_for_prev_chapter:
                         chapters.append(create_chapter_object(current_chapter_title, text_for_prev_chapter, chapter_index_counter))
                         chapter_index_counter += 1
-                    current_chapter_content = [] # Reset for the new chapter
+                current_chapter_content = [] # Reset for the new chapter
 
                 new_chapter_title = element.get_text(separator=' ', strip=True)
-                if new_chapter_title: # Only update if title is non-empty
+                if new_chapter_title:
                     current_chapter_title = new_chapter_title
-                # Don't add the heading itself to chapter content if it's used as title
-                continue # Move to next element
-
-            # Content extraction from allowed tags
-            if element.name in content_tags:
-                # Heuristic: Avoid extracting text from divs that are just containers for other block elements
-                # or from divs that seem like navigation, headers, footers. This is complex.
-                # A simple check: if a div has other block elements as direct children, maybe skip its direct text.
-                # For now, keep it simple: extract text from all specified content_tags.
-                # Consider more specific class/id checks if Calibre output is consistent.
-
-                text = element.get_text(separator=' ', strip=True)
-                if text:
-                    # Basic sentence-ending punctuation for consistency, if not already present
+                # The text of h1/h2 is only for the title, not content of this new chapter.
+            else: # It's not an h1 or h2, so consider it for content.
+                if element.name in content_tags: # Check if it's a tag we care about for content
+                    text = element.get_text(separator=' ', strip=True)
+                    if text:
+                        # Basic sentence-ending punctuation for consistency
                     if not text.endswith(('.', '!', '?', ':', ';')):
                         text += '.'
                     current_chapter_content.append(text)
+            # If the element is not a heading and not in content_tags, its text is ignored.
 
         # Add the last accumulated chapter
         if current_chapter_content:
             text_for_last_chapter = '\n'.join(current_chapter_content).strip()
             if text_for_last_chapter:
                 chapters.append(create_chapter_object(current_chapter_title, text_for_last_chapter, chapter_index_counter))
+            elif not chapters and current_chapter_title != "Introduction": # Handle case where only a title was found but no content followed
+                 chapters.append(create_chapter_object(current_chapter_title, "", chapter_index_counter))
+
 
         # If no chapters were found (e.g. no h1/h2 tags), treat the whole content as one chapter
         if not chapters and content_body:
