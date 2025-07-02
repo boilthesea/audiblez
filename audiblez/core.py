@@ -691,8 +691,11 @@ def convert_ebook_with_calibre(input_ebook_path: str, output_html_dir: str, ui_c
 
     output_dir = Path(output_html_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    # Define a predictable output HTML filename within the output_html_dir
-    output_html_file = output_dir / "output.html"
+    # Define a predictable output HTMLZ filename within the output_html_dir
+    output_htmlz_file = output_dir / "output.htmlz"
+    # Define the expected name of the HTML file inside the HTMLZ archive
+    extracted_html_filename = "index.html" # Common default, might need adjustment
+    final_extracted_html_path = output_dir / extracted_html_filename
 
     # ebook-convert options:
     # --enable-heuristics: Useful for some conversions.
@@ -710,7 +713,7 @@ def convert_ebook_with_calibre(input_ebook_path: str, output_html_dir: str, ui_c
     command = [
         ebook_convert_exe,
         str(input_path),
-        str(output_html_file),
+        str(output_htmlz_file), # Output to .htmlz
         # Example options (can be customized or made configurable):
         # "--enable-heuristics",
         # "--smarten-punctuation",
@@ -724,12 +727,66 @@ def convert_ebook_with_calibre(input_ebook_path: str, output_html_dir: str, ui_c
         result = subprocess.run(command, capture_output=True, text=True, check=False, encoding='utf-8')
 
         if result.returncode == 0:
-            print(f"Calibre conversion successful. Output HTML: {output_html_file}")
-            if output_html_file.exists():
-                return str(output_html_file)
+            print(f"Calibre conversion to HTMLZ successful. Output: {output_htmlz_file}")
+            if output_htmlz_file.exists():
+                # Unzip the HTMLZ file
+                import zipfile
+                try:
+                    with zipfile.ZipFile(output_htmlz_file, 'r') as zip_ref:
+                        # Try to find the common main HTML file names
+                        # Calibre often uses 'index.html', 'content.html', or 'book.html'
+                        # Sometimes it could also be titlepage.xhtml then main content is linked.
+                        # For simplicity, we'll look for a few common ones.
+                        # A more robust solution might inspect the OPF if present in the zip.
+                        potential_html_files = [name for name in zip_ref.namelist() if name.lower().endswith(('.html', '.xhtml'))]
+
+                        main_html_in_zip = None
+                        if extracted_html_filename in potential_html_files: # Check our default first
+                            main_html_in_zip = extracted_html_filename
+                        elif 'content.html' in potential_html_files:
+                            main_html_in_zip = 'content.html'
+                        elif 'book.html' in potential_html_files:
+                            main_html_in_zip = 'book.html'
+                        elif potential_html_files: # Fallback to the first HTML/XHTML file found
+                            main_html_in_zip = potential_html_files[0]
+                            print(f"Warning: '{extracted_html_filename}' not found in HTMLZ. Using first HTML file found: '{main_html_in_zip}'")
+
+                        if main_html_in_zip:
+                            # Extract the specific HTML file to the target path
+                            # Need to ensure the final_extracted_html_path is just the filename part
+                            # and zip_ref.extract expects the member name and the output directory.
+                            zip_ref.extract(main_html_in_zip, path=output_dir)
+                            # Rename if necessary to the consistent final_extracted_html_path
+                            extracted_file_from_zip = output_dir / main_html_in_zip
+                            if extracted_file_from_zip != final_extracted_html_path:
+                                extracted_file_from_zip.rename(final_extracted_html_path)
+
+                            print(f"Successfully extracted '{main_html_in_zip}' to '{final_extracted_html_path}'")
+
+                            # Clean up the HTMLZ file after successful extraction
+                            try:
+                                output_htmlz_file.unlink()
+                            except OSError as e:
+                                print(f"Warning: Could not delete HTMLZ file '{output_htmlz_file}': {e}")
+
+                            return str(final_extracted_html_path)
+                        else:
+                            print(f"ERROR: Could not find a suitable HTML/XHTML file (e.g., '{extracted_html_filename}', 'content.html') in '{output_htmlz_file}'.")
+                            print(f"Files in archive: {zip_ref.namelist()}")
+                            return None
+                except zipfile.BadZipFile:
+                    print(f"ERROR: Failed to unzip '{output_htmlz_file}'. File may be corrupted or not a valid zip archive.")
+                    return None
+                except KeyError:
+                    print(f"ERROR: Assumed HTML file '{extracted_html_filename}' not found within the HTMLZ archive '{output_htmlz_file}'.")
+                    return None
+                except Exception as e_zip:
+                    print(f"ERROR: An error occurred during unzipping of '{output_htmlz_file}': {e_zip}")
+                    traceback.print_exc()
+                    return None
             else:
                 # This case should be rare if returncode is 0, but good to check.
-                print(f"ERROR: Calibre reported success, but output file '{output_html_file}' not found.")
+                print(f"ERROR: Calibre reported success, but output HTMLZ file '{output_htmlz_file}' not found.")
                 print(f"Calibre stdout:\n{result.stdout}")
                 print(f"Calibre stderr:\n{result.stderr}")
                 return None
@@ -737,12 +794,12 @@ def convert_ebook_with_calibre(input_ebook_path: str, output_html_dir: str, ui_c
             print(f"ERROR: Calibre ebook-convert failed with return code {result.returncode}")
             print(f"Calibre stdout:\n{result.stdout}")
             print(f"Calibre stderr:\n{result.stderr}")
-            # Potentially clean up output_html_file if it was created but is incomplete/invalid
-            if output_html_file.exists():
+            # Potentially clean up output_htmlz_file if it was created but is incomplete/invalid
+            if output_htmlz_file.exists():
                 try:
-                    output_html_file.unlink()
+                    output_htmlz_file.unlink()
                 except OSError as e:
-                    print(f"Warning: Could not delete incomplete output file '{output_html_file}': {e}")
+                    print(f"Warning: Could not delete incomplete output HTMLZ file '{output_htmlz_file}': {e}")
             return None
 
     except FileNotFoundError:
