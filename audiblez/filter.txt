@@ -1,0 +1,140 @@
+# Filter file for audiblez
+#
+# This file allows you to define text replacements to improve audiobook narration.
+#
+# Format:
+# Each line represents a rule.
+# Lines starting with # are comments and are ignored.
+# Empty lines are ignored.
+#
+# Rule format:
+#   items_to_filter|replacement
+#
+# - items_to_filter: One or more patterns to search for, separated by commas.
+#                    Example: Mr.,mr.
+# - replacement: The text that will replace the found patterns.
+#                    Example: Mister
+#
+# Full example:
+#   Mr.,mr.|Mister
+# This will replace both "Mr." and "mr." with "Mister".
+#
+# Note: The order of rules can matter if one pattern is a substring of another.
+# For now, rules are applied in the order they appear in this file.
+
+# Common Abbreviations
+Mr.|Mister
+Mrs.|Misses
+Ms.|Miss
+Dr.|Doctor
+St.|Saint
+Rd.|Road
+Ave.|Avenue
+Gen.|General
+Adm.|Admiral
+Capt.|Captain
+Cmdr.|Commander
+Lt.|Lieutenant
+Sgt.|Sergeant
+Prof.|Professor
+Hon.|Honorable
+Rev.|Reverend
+Pres.|President
+VP.|Vice President
+Sec.|Secretary
+Treas.|Treasurer
+Esq.|Esquire
+Jr.|Junior
+Sr.|Senior
+No.|Number
+Nos.|Numbers
+Vol.|Volume
+Vols.|Volumes
+Ch.|Chapter
+Fig.|Figure
+Figs.|Figures
+Ed.|Edition
+Eds.|Editions
+et al.|et all
+i.e.|that is
+e.g.|for example
+viz.|namely
+vs.|versus
+etc.|et cetera
+
+# Roman Numerals - Chapters (I-XL)
+Chapter I.|Chapter One.
+Chapter II.|Chapter Two.
+Chapter III.|Chapter Three.
+Chapter IV.|Chapter Four.
+Chapter V.|Chapter Five.
+Chapter VI.|Chapter Six.
+Chapter VII.|Chapter Seven.
+Chapter VIII.|Chapter Eight.
+Chapter IX.|Chapter Nine.
+Chapter X.|Chapter Ten.
+Chapter XI.|Chapter Eleven.
+Chapter XII.|Chapter Twelve.
+Chapter XIII.|Chapter Thirteen.
+Chapter XIV.|Chapter Fourteen.
+Chapter XV.|Chapter Fifteen.
+Chapter XVI.|Chapter Sixteen.
+Chapter XVII.|Chapter Seventeen.
+Chapter XVIII.|Chapter Eighteen.
+Chapter XIX.|Chapter Nineteen.
+Chapter XX.|Chapter Twenty.
+Chapter XXI.|Chapter Twenty One.
+Chapter XXII.|Chapter Twenty Two.
+Chapter XXIII.|Chapter Twenty Three.
+Chapter XXIV.|Chapter Twenty Four.
+Chapter XXV.|Chapter Twenty Five.
+Chapter XXVI.|Chapter Twenty Six.
+Chapter XXVII.|Chapter Twenty Seven.
+Chapter XXVIII.|Chapter Twenty Eight.
+Chapter XXIX.|Chapter Twenty Nine.
+Chapter XXX.|Chapter Thirty.
+Chapter XXXI.|Chapter Thirty One.
+Chapter XXXII.|Chapter Thirty Two.
+Chapter XXXIII.|Chapter Thirty Three.
+Chapter XXXIV.|Chapter Thirty Four.
+Chapter XXXV.|Chapter Thirty Five.
+Chapter XXXVI.|Chapter Thirty Six.
+Chapter XXXVII.|Chapter Thirty Seven.
+Chapter XXXVIII.|Chapter Thirty Eight.
+Chapter XXXIX.|Chapter Thirty Nine.
+Chapter XL.|Chapter Forty.
+
+# Roman Numerals - Sections (I-V)
+Section I.|Section One.
+Section II.|Section Two.
+Section III.|Section Three.
+Section IV.|Section Four.
+Section V.|Section Five.
+
+# Possessive abbreviations - Add more as needed
+Mr.'s|Mister's
+Mrs.'s|Misses's
+Ms.'s|Miss's
+Dr.'s|Doctor's
+Prof.'s|Professor's
+Pres.'s|President's
+
+# Common ordinal abbreviations
+1st|First
+2nd|Second
+3rd|Third
+4th|Fourth
+5th|Fifth
+6th|Sixth
+7th|Seventh
+8th|Eighth
+9th|Ninth
+10th|Tenth
+# Add more ordinals if commonly misread, e.g., 21st, 22nd, etc.
+# Spacy usually handles these well, but this is an option.
+
+# Misc
+U.S.|United States
+U.K.|United Kingdom
+U.S.A.|United States of America
+E.U.|European Union
