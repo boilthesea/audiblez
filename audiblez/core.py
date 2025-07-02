@@ -1144,8 +1144,8 @@ def extract_chapters_and_metadata_from_calibre_html(html_file_path: str, opf_fil
                     text = element.get_text(separator=' ', strip=True)
                     if text:
                         # Basic sentence-ending punctuation for consistency
-                    if not text.endswith(('.', '!', '?', ':', ';')):
-                        text += '.'
+                        if not text.endswith(('.', '!', '?', ':', ';')):
+                            text += '.'
                     current_chapter_content.append(text)
             # If the element is not a heading and not in content_tags, its text is ignored.
 
