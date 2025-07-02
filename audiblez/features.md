@@ -138,7 +138,7 @@ This plan outlines the steps to implement the features described in `audiblez/fe
 *   **Phase 1.9: Remove Queue Display Debugging Statements** [DONE]
     *   All temporary `print()` statements added for debugging the queue display issue in `audiblez/ui.py` and `audiblez/database.py` have been removed.
 
-**Phase 2: Text Filtering**
+**Phase 2: Text Filtering** [DONE]
 
 *   **Purpose:** To allow users to define custom text replacements (e.g., for abbreviations, Roman numerals) to prevent awkward pauses or mispronunciations by the TTS engine.
 *   **Mechanism:**
@@ -170,9 +170,9 @@ This plan outlines the steps to implement the features described in `audiblez/fe
     *   Connect the "Open ebook with Calibre" UI action to the new Calibre conversion and processing logic.
 
 
-**Phase 3: M4B Assembly and UI Polish**
+**Phase 4: M4B Assembly and UI Polish**
 
-*   **Phase 3.1: Resolving Intermittent M4B Audio Failures**
+*   **Phase 4.1: Resolving Intermittent M4B Audio Failures**
     *   **Problem Analysis:** The intermittent failure of audio being incorporated into the final `.m4b` file was traced to the `ffmpeg` process in `audiblez/core.py`. The process involved two steps: concatenating chapter `.wav` files into a temporary `.tmp.mp4` file, and then packaging that temporary file into the final `.m4b`. The root cause was a combination of factors:
         1.  **Lack of Error Checking:** The script did not check the return code of the first `ffmpeg` command. If the concatenation failed for any reason (e.g., an invalid or empty `.wav` file), the script would proceed silently, attempting to use a non-existent temporary file in the next step.
         2.  **Unreliable Intermediate Format:** The use of a `.tmp.mp4` container for raw PCM audio (`ipcm`) proved to be unreliable. `ffmpeg` would sometimes fail to read the audio from the temporary file it had just created, resulting in an `.m4b` with no audio stream. This was confirmed by the `audio:0KiB` message in the `ffmpeg` log, which was initially overlooked.
@@ -184,12 +184,12 @@ This plan outlines the steps to implement the features described in `audiblez/fe
         3.  **Add Robust Error Handling:** The `subprocess.run` calls for `ffmpeg` will be modified to include `check=True`. This will cause the script to raise a `CalledProcessError` if `ffmpeg` returns a non-zero exit code, making it immediately obvious when a step has failed. The `try...except` blocks around these calls will be enhanced to catch these errors, log them, and provide more informative feedback to the user.
         4.  **Sanitize Filenames:** To avoid issues with spaces and special characters in filenames, the script will generate a temporary filename without spaces for the `.m4b` file, and then rename it to the final, user-friendly name after the `ffmpeg` process is complete.
 
-*   **Phase 3.2: Fixing the UI Hanging at 99%**
+*   **Phase 4.2: Fixing the UI Hanging at 99%**
     *   **Problem Analysis:** The UI hangs at 99% because the progress calculation in `audiblez/core.py` uses integer division, which can result in the final progress value never reaching exactly 100%. Additionally, the `on_core_finished` event handler in `audiblez/ui.py` does not explicitly set the progress bar to 100% upon completion.
     *   **Solution:**
         1.  **Ensure 100% Completion:** The `on_core_finished` event handler in `audiblez/ui.py` will be modified to explicitly set the progress bar's value to 100 when the `CORE_FINISHED` event is received. This will ensure that the UI always reflects the completed state, regardless of the final calculated progress value.
         2.  **Improve Progress Calculation:** While not strictly necessary to fix the hanging issue, the progress calculation in `gen_audio_segments` in `audiblez/core.py` can be improved by using floating-point division to provide a more accurate representation of the progress.
-        
+
 **Future Feature (Output Type):**
 
 *   This feature (mentioned in Idea 1) would involve adding an option to select the output file type (e.g., MP3, M4B, WAV) and integrating this into the synthesis process and the queue item settings. This can be planned in detail once the core features are implemented.
