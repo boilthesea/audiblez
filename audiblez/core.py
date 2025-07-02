@@ -1025,10 +1025,7 @@ def extract_chapters_and_metadata_from_calibre_html(html_file_path: str, opf_fil
         'publisher': '',
         'date': ''
     }
-    current_chapter_title = "Introduction" # Default for content before the first heading
-    current_chapter_content = []
-    chapter_index_counter = 0
-
+    
     # Parse metadata.opf first
     if opf_file_path and Path(opf_file_path).exists():
         try:
@@ -1106,8 +1103,7 @@ def extract_chapters_and_metadata_from_calibre_html(html_file_path: str, opf_fil
 
         # Relevant tags for content extraction, similar to EPUB processing
         # but chapters are delimited by h1/h2 in the flow of these tags.
-        content_tags = ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'div'] # Added div for more general content blocks
-
+        
         def create_chapter_object(title, text_content, index):
             chapter_obj = SimpleNamespace()
             chapter_obj.title = title # Used by core.main for file naming if get_name() not present
@@ -1120,45 +1116,44 @@ def extract_chapters_and_metadata_from_calibre_html(html_file_path: str, opf_fil
             chapter_obj.get_type = lambda: "calibre_html_chapter" # Dummy type
             return chapter_obj
 
-        # Iterate through direct children of the content body to better control chapter segmentation
-        for element in content_body.find_all(recursive=False):
-            if not hasattr(element, 'name') or not element.name: # Skip NavigableStrings, comments, etc.
-                continue
-
-            # Chapter demarcation: h1 or h2
+        # Improved chapter splitting logic
+        sections = []
+        current_section = None
+        for element in content_body.find_all(['h1', 'h2', 'p', 'div', 'ul', 'ol', 'blockquote']):
             if element.name in ['h1', 'h2']:
-                # If there's existing content, save it as the previous chapter
-                if current_chapter_content:
-                    text_for_prev_chapter = '\n'.join(current_chapter_content).strip()
-                    if text_for_prev_chapter:
-                        chapters.append(create_chapter_object(current_chapter_title, text_for_prev_chapter, chapter_index_counter))
-                        chapter_index_counter += 1
-                current_chapter_content = [] # Reset for the new chapter
+                if current_section:
+                    sections.append(current_section)
+                current_section = {'title': element.get_text(strip=True), 'content': []}
+            elif current_section:
+                current_section['content'].append(element.get_text(strip=True))
 
-                new_chapter_title = element.get_text(separator=' ', strip=True)
-                if new_chapter_title:
-                    current_chapter_title = new_chapter_title
-                # The text of h1/h2 is only for the title, not content of this new chapter.
-            else: # It's not an h1 or h2, so consider it for content.
-                if element.name in content_tags: # Check if it's a tag we care about for content
-                    text = element.get_text(separator=' ', strip=True)
-                    if text:
-                        # Basic sentence-ending punctuation for consistency
-                        if not text.endswith(('.', '!', '?', ':', ';')):
-                            text += '.'
-                    current_chapter_content.append(text)
-            # If the element is not a heading and not in content_tags, its text is ignored.
+        if current_section:
+            sections.append(current_section)
 
-        # Add the last accumulated chapter
-        if current_chapter_content:
-            text_for_last_chapter = '\n'.join(current_chapter_content).strip()
-            if text_for_last_chapter:
-                chapters.append(create_chapter_object(current_chapter_title, text_for_last_chapter, chapter_index_counter))
-            elif not chapters and current_chapter_title != "Introduction": # Handle case where only a title was found but no content followed
-                 chapters.append(create_chapter_object(current_chapter_title, "", chapter_index_counter))
+        # Filter sections to identify real chapters
+        chapter_index_counter = 0
+        for section in sections:
+            title = section['title']
+            content = '\n'.join(section['content']).strip()
+            
+            # Heuristics to identify chapters
+            is_likely_chapter = (
+                re.search(r'^(chapter|part|book)\s*\d+', title, re.IGNORECASE) or
+                re.search(r'^\d+', title) or
+                len(content) > 500 # Assume long sections are chapters
+            )
+            
+            is_likely_not_chapter = (
+                'contents' in title.lower() or
+                'title page' in title.lower() or
+                'introduction' in title.lower()
+            )
 
+            if is_likely_chapter and not is_likely_not_chapter:
+                chapters.append(create_chapter_object(title, content, chapter_index_counter))
+                chapter_index_counter += 1
 
-        # If no chapters were found (e.g. no h1/h2 tags), treat the whole content as one chapter
+        # If no chapters were found, treat the whole content as one chapter
         if not chapters and content_body:
             all_text = content_body.get_text(separator='\n', strip=True)
             if all_text: # Ensure there's actual text before creating a chapter
@@ -1181,3 +1176,4 @@ def extract_chapters_and_metadata_from_calibre_html(html_file_path: str, opf_fil
         print(f"ERROR: Failed to parse or extract chapters from HTML file '{html_file_path}': {e}")
         traceback.print_exc()
         return [], metadata # Return empty chapters list and current metadata
+

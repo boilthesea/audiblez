@@ -178,7 +178,7 @@ This plan outlines the steps to implement the features described in `audiblez/fe
     *   Renamed `extract_chapters_from_calibre_html` to `extract_chapters_and_metadata_from_calibre_html` in [`audiblez/core.py`](audiblez/core.py):
         *   This function now accepts the path to the extracted `metadata.opf` file.
         *   It parses `metadata.opf` to extract book metadata (title, creator, language, subjects, rights, publisher, date).
-        *   It continues to parse the HTML file for chapter structure using `<h1>` and `<h2>` tags.
+        *   The chapter parsing logic is improved to more accurately identify chapters. Instead of treating every `<h1>` and `<h2>` as a new chapter, it now splits the document into sections based on these tags and then filters these sections to identify "real" chapters using heuristics (e.g., looking for keywords like "Chapter", "Part", or numbers in the heading).
         *   Returns a tuple: `(list_of_chapter_objects, metadata_dictionary)`.
 *   **Phase 3.4: Integrate Calibre Workflow into UI** [DONE]
     *   Modified `on_open_with_calibre` in [`audiblez/ui.py`](audiblez/ui.py):
