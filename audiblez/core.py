@@ -74,33 +74,77 @@ def set_espeak_library():
 
 
 def main(file_path, voice, pick_manually, speed, output_folder='.',
-         max_chapters=None, max_sentences=None, selected_chapters=None, post_event=None):
+         max_chapters=None, max_sentences=None, selected_chapters=None, post_event=None,
+         calibre_metadata: dict | None = None, calibre_cover_image_path: str | None = None):
     if post_event: post_event('CORE_STARTED')
     load_spacy()
     if output_folder != '.':
         Path(output_folder).mkdir(parents=True, exist_ok=True)
 
-    filename = Path(file_path).name
+    filename = Path(file_path).name # Original filename, used for output naming
+    title = "Untitled Book"
+    creator = "Unknown Author"
+    cover_image = b""
+    document_chapters = [] # Will be populated by EPUB or pre-set by Calibre workflow
 
-    extension = '.epub'
-    book = epub.read_epub(file_path)
-    meta_title = book.get_metadata('DC', 'title')
-    title = meta_title[0][0] if meta_title else ''
-    meta_creator = book.get_metadata('DC', 'creator')
-    creator = meta_creator[0][0] if meta_creator else ''
+    # Determine if this is a Calibre workflow or EPUB workflow for metadata/cover
+    is_calibre_workflow = bool(calibre_metadata)
 
-    cover_maybe = find_cover(book)
-    cover_image = cover_maybe.get_content() if cover_maybe else b""
-    if cover_maybe:
-        print(f'Found cover image {cover_maybe.file_name} in {cover_maybe.media_type} format')
+    if is_calibre_workflow:
+        print("Processing with Calibre-derived data.")
+        title = calibre_metadata.get('title', title)
+        creator = calibre_metadata.get('creator', creator)
+        # Language from Calibre metadata could be used by KPipeline if needed, but KPipeline sets lang by voice.
+        # For now, primarily for M4B metadata.
 
-    document_chapters = find_document_chapters_and_extract_texts(book)
+        if calibre_cover_image_path and Path(calibre_cover_image_path).exists():
+            try:
+                with open(calibre_cover_image_path, 'rb') as f_cover:
+                    cover_image = f_cover.read()
+                print(f"Loaded cover image from Calibre path: {calibre_cover_image_path}")
+            except Exception as e:
+                print(f"Error reading Calibre cover image from '{calibre_cover_image_path}': {e}")
+                cover_image = b""
 
-    if not selected_chapters:
-        if pick_manually is True:
-            selected_chapters = pick_chapters(document_chapters)
+        # For Calibre workflow, `selected_chapters` are already provided and are SimpleNamespace objects.
+        # `document_chapters` is not strictly needed if `selected_chapters` is always given.
+        # However, `print_selected_chapters` expects `document_chapters` for context.
+        # If `selected_chapters` is what we operate on, `document_chapters` can be set to it.
+        if selected_chapters:
+            document_chapters = selected_chapters # Use the pre-processed chapters
         else:
-            selected_chapters = find_good_chapters(document_chapters)
+            print("Warning: Calibre workflow initiated but no selected_chapters provided to core.main.")
+            # This case should ideally not happen if UI passes chapters.
+            # If it does, we can't proceed without chapters.
+            if post_event: post_event('CORE_FINISHED', error_message="No chapters provided for Calibre book.")
+            return
+
+
+    else: # Standard EPUB workflow
+        print("Processing with EPUB data.")
+        book = epub.read_epub(file_path)
+        meta_title_dc = book.get_metadata('DC', 'title')
+        title = meta_title_dc[0][0] if meta_title_dc else title
+        meta_creator_dc = book.get_metadata('DC', 'creator')
+        creator = meta_creator_dc[0][0] if meta_creator_dc else creator
+
+        cover_maybe = find_cover(book)
+        cover_image = cover_maybe.get_content() if cover_maybe else b""
+        if cover_maybe:
+            print(f'Found cover image {cover_maybe.file_name} in {cover_maybe.media_type} format')
+
+        document_chapters = find_document_chapters_and_extract_texts(book)
+        # Chapter selection logic for EPUBs remains
+        if not selected_chapters: # If UI didn't pre-select
+            if pick_manually is True: # CLI option
+                selected_chapters = pick_chapters(document_chapters)
+            else: # Default chapter finding for EPUB
+                selected_chapters = find_good_chapters(document_chapters)
+
+    if not selected_chapters: # Catch-all if no chapters ended up selected
+        print("Error: No chapters selected or found for processing.")
+        if post_event: post_event('CORE_FINISHED', error_message="No chapters selected.")
+        return
     print_selected_chapters(document_chapters, selected_chapters)
     texts = [c.extracted_text for c in selected_chapters]
 
@@ -143,15 +187,24 @@ def main(file_path, voice, pick_manually, speed, output_folder='.',
     for i, chapter in enumerate(selected_chapters, start=1):
         if max_chapters and i > max_chapters: break
         text = chapter.extracted_text
-        # Use chapter.title if get_name() is not available (for ChapterForCore objects from queue)
-        if hasattr(chapter, 'get_name'):
+        # Use chapter.title if get_name() is not available (for ChapterForCore objects from queue or Calibre)
+        if hasattr(chapter, 'get_name') and callable(chapter.get_name): # For EPUB chapters
             original_name = chapter.get_name()
-        elif hasattr(chapter, 'title'):
+        elif hasattr(chapter, 'title') and chapter.title: # For Calibre SimpleNamespace chapters or queued chapters
             original_name = chapter.title
         else:
             original_name = f"chapter_{i}" # Fallback if neither is present
-        xhtml_file_name = original_name.replace(' ', '_').replace('/', '_').replace('\\', '_')
-        chapter_wav_path = Path(output_folder) / filename.replace(extension, f'_chapter_{i}_{voice}_{xhtml_file_name}.wav')
+
+        # Sanitize original_name for use in filename
+        # Replace common problematic characters, limit length
+        safe_original_name = re.sub(r'[^\w\s-]', '', original_name) # Keep word chars, whitespace, hyphens
+        safe_original_name = re.sub(r'\s+', '_', safe_original_name).strip('_') # Replace whitespace with underscore
+        safe_original_name = safe_original_name[:50] # Limit length to avoid overly long filenames
+
+        # Determine output filename based on original input filename's stem
+        base_filename_stem = Path(filename).stem # e.g., "mybook" from "mybook.epub" or "mybook.mobi"
+
+        chapter_wav_path = Path(output_folder) / f'{base_filename_stem}_chapter_{i}_{voice}_{safe_original_name}.wav'
         chapter_wav_files.append(chapter_wav_path)
 
         # Apply filters before checking length or existence, so stats are based on filtered text length
@@ -202,9 +255,12 @@ def main(file_path, voice, pick_manually, speed, output_folder='.',
             chapter_wav_files.remove(chapter_wav_path)
 
     if has_ffmpeg:
+        # Use the original input filename (which includes original extension) for M4B naming logic
         create_index_file(title, creator, chapter_wav_files, output_folder)
-        create_m4b(chapter_wav_files, filename, cover_image, output_folder)
+        create_m4b(chapter_wav_files, Path(file_path).name, cover_image, output_folder) # Pass original filename
         if post_event: post_event('CORE_FINISHED')
+    else:
+        if post_event: post_event('CORE_FINISHED', error_message="ffmpeg not found, M4B not created.")
 
 
 def find_cover(book):
@@ -351,45 +407,95 @@ def concat_wavs_with_ffmpeg(chapter_files, output_folder, filename):
     return concat_file_path
 
 
-def create_m4b(chapter_files, filename, cover_image, output_folder):
-    concat_file_path = concat_wavs_with_ffmpeg(chapter_files, output_folder, filename)
-    final_filename = Path(output_folder) / filename.replace('.epub', '.m4b')
+def create_m4b(chapter_files, original_input_filename: str, cover_image: bytes | None, output_folder: str):
+    # original_input_filename is the full name like "mybook.epub" or "another.mobi"
+    concat_file_path = concat_wavs_with_ffmpeg(chapter_files, output_folder, original_input_filename)
+
+    # Derive M4B filename from the original input filename's stem
+    m4b_basename = Path(original_input_filename).stem + ".m4b"
+    final_filename = Path(output_folder) / m4b_basename
+
     chapters_txt_path = Path(output_folder) / "chapters.txt"
-    print('Creating M4B file...')
+    print(f"Creating M4B file: {final_filename}")
 
-    if cover_image:
-        cover_file_path = Path(output_folder) / 'cover'
-        with open(cover_file_path, 'wb') as f:
-            f.write(cover_image)
-        cover_image_args = [
-            '-i', f'{cover_file_path}',
-            '-map', '2:v',  # Map cover image
-            '-disposition:v', 'attached_pic',  # Ensure cover is embedded
-            '-c:v', 'copy',  # Keep cover unchanged
-        ]
-    else:
-        cover_image_args = []
-
-    proc = subprocess.run([
+    temp_cover_file_path = None # To keep track of temporary cover file for cleanup
+    ffmpeg_command = [
         'ffmpeg',
         '-y',  # Overwrite output
-        
-        '-i', f'{concat_file_path}',  # Input audio
-        '-i', f'{chapters_txt_path}',  # Input chapters
-        *cover_image_args,  # Cover image (if provided)
+        '-i', str(concat_file_path),  # Input audio (Input 0)
+        '-i', str(chapters_txt_path),  # Input chapters (Input 1)
+    ]
 
-        '-map', '0:a',  # Map audio
-        '-c:a', 'aac',  # Convert to AAC
-        '-b:a', '64k',  # Reduce bitrate for smaller size
+    cover_input_index = 2 # Default starting index for cover if added
 
-        '-map_metadata', '1', # Map metadata
+    if cover_image:
+        # It's generally safer to write the cover to a temp file with a proper extension
+        # that ffmpeg understands (e.g., .jpg, .png).
+        # We'll try to infer the type, default to jpg.
+        # A more robust way would be to use a library like 'filetype' or check magic numbers.
+        # For now, assume common types or let ffmpeg figure it out if written as .jpg.
+        # Pillow can be used to save it in a known format if we want to be very sure.
+        # For this scope, writing raw bytes with a common extension:
+        temp_cover_filename_in_output = "temp_cover_for_m4b.jpg" # ffmpeg often prefers common extensions
+        temp_cover_file_path = Path(output_folder) / temp_cover_filename_in_output
+        try:
+            with open(temp_cover_file_path, 'wb') as f_cover:
+                f_cover.write(cover_image)
 
-        '-f', 'mp4',  # Output as M4B
-        f'{final_filename}'  # Output file
+            ffmpeg_command.extend([
+                '-i', str(temp_cover_file_path), # Cover image (Input 2 or higher)
+            ])
+            # Cover image args for mapping will be added later
+        except Exception as e:
+            print(f"Warning: Could not write temporary cover file: {e}. Proceeding without cover.")
+            temp_cover_file_path = None # Ensure it's None if write failed
+            cover_image = None # Nullify cover_image to prevent mapping attempts
+
+    # Add mapping arguments
+    ffmpeg_command.extend([
+        '-map', '0:a',                # Map audio from input 0
+        '-map_metadata', '1',         # Map metadata from input 1 (chapters.txt)
     ])
 
-    Path(concat_file_path).unlink()
-    if proc.returncode == 0:
+    if cover_image and temp_cover_file_path: # If cover was successfully prepared
+        ffmpeg_command.extend([
+            '-map', f'{cover_input_index}:v',      # Map video stream from the cover input
+            '-disposition:v', 'attached_pic',
+            '-c:v', 'mjpeg', # Or copy if the source is known to be jpeg/png. mjpeg is safer for wider input.
+                              # Using 'copy' assumes the temp_cover_file_path is already a valid video stream for mp4
+                              # 'mjpeg' will re-encode it, which is more robust for arbitrary image inputs.
+        ])
+
+    ffmpeg_command.extend([
+        '-c:a', 'aac',                # Convert audio to AAC
+        '-b:a', '64k',                # Reduce audio bitrate
+        '-f', 'mp4',                  # Output as M4B (mp4 container)
+        str(final_filename)           # Output file
+    ])
+
+    print(f"Executing ffmpeg command: {' '.join(ffmpeg_command)}")
+    proc = subprocess.run(ffmpeg_command, capture_output=True, text=True)
+
+    if proc.returncode != 0:
+        print(f"Error creating M4B file. ffmpeg exit code: {proc.returncode}")
+        print(f"ffmpeg stdout:\n{proc.stdout}")
+        print(f"ffmpeg stderr:\n{proc.stderr}")
+    else:
+        print(f"'{final_filename}' created successfully. Enjoy your audiobook.")
+        print("Feel free to delete the intermediary .wav chapter files; the .m4b is all you need.")
+
+    # Cleanup
+    if concat_file_path.exists():
+        try: concat_file_path.unlink()
+        except OSError as e: print(f"Warning: Could not delete temp concat file '{concat_file_path}': {e}")
+
+    if temp_cover_file_path and temp_cover_file_path.exists():
+        try: temp_cover_file_path.unlink()
+        except OSError as e: print(f"Warning: Could not delete temporary cover file '{temp_cover_file_path}': {e}")
+
+    # This part was outside the original function, seems like a typo or misplaced.
+    # Path(concat_file_path).unlink() # This is redundant if concat_file_path.unlink() is called above
+    if proc.returncode == 0: # This check is now inside the function
         print(f'{final_filename} created. Enjoy your audiobook.')
         print('Feel free to delete the intermediary .wav chapter files, the .m4b is all you need.')
 
@@ -676,7 +782,9 @@ def convert_ebook_with_calibre(input_ebook_path: str, output_html_dir: str, ui_c
         ui_callback_for_path_selection: Function to call if Calibre path needs user selection.
 
     Returns:
-        str | None: Path to the generated HTML file if successful, None otherwise.
+        tuple[str | None, str | None, str | None]: Paths to the extracted HTML file,
+                                                   metadata.opf file, and cover image file if successful,
+                                                   otherwise (None, None, None).
     """
     ebook_convert_exe = get_calibre_ebook_convert_path(ui_callback_for_path_selection)
     if not ebook_convert_exe:
@@ -696,6 +804,8 @@ def convert_ebook_with_calibre(input_ebook_path: str, output_html_dir: str, ui_c
     # Define the expected name of the HTML file inside the HTMLZ archive
     extracted_html_filename = "index.html" # Common default, might need adjustment
     final_extracted_html_path = output_dir / extracted_html_filename
+    extracted_opf_path = None
+    extracted_cover_path = None
 
     # ebook-convert options:
     # --enable-heuristics: Useful for some conversions.
@@ -764,32 +874,108 @@ def convert_ebook_with_calibre(input_ebook_path: str, output_html_dir: str, ui_c
                             print(f"Successfully extracted '{main_html_in_zip}' to '{final_extracted_html_path}'")
 
                             # Clean up the HTMLZ file after successful extraction
+                            # --- Start: Extract metadata.opf and cover image ---
+                            opf_filename_in_zip = "metadata.opf" # Standard name
+                            cover_filename_in_zip = None
+                            temp_extracted_opf_path = None
+
+                            if opf_filename_in_zip in zip_ref.namelist():
+                                zip_ref.extract(opf_filename_in_zip, path=output_dir)
+                                temp_extracted_opf_path = output_dir / opf_filename_in_zip
+                                print(f"Successfully extracted '{opf_filename_in_zip}' to '{temp_extracted_opf_path}'")
+
+                                # Parse OPF to find cover image filename
+                                try:
+                                    import xml.etree.ElementTree as ET
+                                    tree = ET.parse(temp_extracted_opf_path)
+                                    root = tree.getroot()
+                                    # Namespace dictionary for OPF parsing
+                                    ns = {
+                                        'opf': 'http://www.idpf.org/2007/opf',
+                                        'dc': 'http://purl.org/dc/elements/1.1/'
+                                    }
+                                    # Try to find cover image via <meta name="cover" content="ID_OF_COVER_ITEM" />
+                                    # then find item with that ID, then get its href.
+                                    # Or directly from <guide><reference type="cover" href="cover.jpg"/></guide>
+                                    guide_cover_href = None
+                                    for guide_ref in root.findall('.//opf:guide/opf:reference[@type="cover"]', ns):
+                                        guide_cover_href = guide_ref.get('href')
+                                        if guide_cover_href:
+                                            break
+
+                                    if guide_cover_href:
+                                        cover_filename_in_zip = guide_cover_href
+                                        print(f"Found cover image reference in OPF guide: '{cover_filename_in_zip}'")
+                                    else: # Fallback: try to find meta tag for cover
+                                        cover_meta_content_id = None
+                                        for meta_tag in root.findall('.//opf:metadata/opf:meta[@name="cover"]', ns):
+                                            cover_meta_content_id = meta_tag.get('content')
+                                            if cover_meta_content_id:
+                                                break
+                                        if cover_meta_content_id:
+                                            for item_tag in root.findall(f".//opf:manifest/opf:item[@id='{cover_meta_content_id}']", ns):
+                                                cover_href = item_tag.get('href')
+                                                if cover_href:
+                                                    cover_filename_in_zip = cover_href
+                                                    print(f"Found cover image reference in OPF manifest via meta tag: '{cover_filename_in_zip}'")
+                                                    break
+
+                                    if not cover_filename_in_zip:
+                                        # Fallback: if no explicit cover in OPF, look for common names
+                                        common_cover_names = ['cover.jpg', 'cover.jpeg', 'cover.png']
+                                        for name in common_cover_names:
+                                            if name in zip_ref.namelist():
+                                                cover_filename_in_zip = name
+                                                print(f"Found potential cover by common name: '{cover_filename_in_zip}'")
+                                                break
+                                except ET.ParseError as e_xml:
+                                    print(f"Warning: Could not parse '{opf_filename_in_zip}' to find cover image: {e_xml}")
+                                except Exception as e_opf_parse:
+                                    print(f"Warning: Error processing '{opf_filename_in_zip}' for cover: {e_opf_parse}")
+
+
+                            if cover_filename_in_zip and cover_filename_in_zip in zip_ref.namelist():
+                                zip_ref.extract(cover_filename_in_zip, path=output_dir)
+                                extracted_cover_path = output_dir / cover_filename_in_zip
+                                print(f"Successfully extracted cover image '{cover_filename_in_zip}' to '{extracted_cover_path}'")
+                            elif cover_filename_in_zip:
+                                print(f"Warning: Cover image '{cover_filename_in_zip}' referenced in OPF but not found in HTMLZ archive.")
+                            else:
+                                print("Warning: Could not determine cover image filename from OPF or common names.")
+
+                            if temp_extracted_opf_path and temp_extracted_opf_path.exists():
+                                extracted_opf_path = temp_extracted_opf_path # Assign to the function's return variable
+                            else:
+                                print(f"Warning: '{opf_filename_in_zip}' not found or not extracted from HTMLZ.")
+                            # --- End: Extract metadata.opf and cover image ---
+
+                            # Clean up the HTMLZ file after successful extraction of all parts
                             try:
                                 output_htmlz_file.unlink()
                             except OSError as e:
                                 print(f"Warning: Could not delete HTMLZ file '{output_htmlz_file}': {e}")
 
-                            return str(final_extracted_html_path)
+                            return str(final_extracted_html_path), str(extracted_opf_path) if extracted_opf_path else None, str(extracted_cover_path) if extracted_cover_path else None
                         else:
                             print(f"ERROR: Could not find a suitable HTML/XHTML file (e.g., '{extracted_html_filename}', 'content.html') in '{output_htmlz_file}'.")
                             print(f"Files in archive: {zip_ref.namelist()}")
-                            return None
+                            return None, None, None
                 except zipfile.BadZipFile:
                     print(f"ERROR: Failed to unzip '{output_htmlz_file}'. File may be corrupted or not a valid zip archive.")
-                    return None
-                except KeyError:
-                    print(f"ERROR: Assumed HTML file '{extracted_html_filename}' not found within the HTMLZ archive '{output_htmlz_file}'.")
-                    return None
+                    return None, None, None
+                except KeyError as e_key:
+                    print(f"ERROR: Assumed HTML file (or other critical file like '{str(e_key)}') not found within the HTMLZ archive '{output_htmlz_file}'.")
+                    return None, None, None
                 except Exception as e_zip:
                     print(f"ERROR: An error occurred during unzipping of '{output_htmlz_file}': {e_zip}")
                     traceback.print_exc()
-                    return None
+                    return None, None, None
             else:
                 # This case should be rare if returncode is 0, but good to check.
                 print(f"ERROR: Calibre reported success, but output HTMLZ file '{output_htmlz_file}' not found.")
                 print(f"Calibre stdout:\n{result.stdout}")
                 print(f"Calibre stderr:\n{result.stderr}")
-                return None
+                return None, None, None
         else:
             print(f"ERROR: Calibre ebook-convert failed with return code {result.returncode}")
             print(f"Calibre stdout:\n{result.stdout}")
@@ -800,46 +986,123 @@ def convert_ebook_with_calibre(input_ebook_path: str, output_html_dir: str, ui_c
                     output_htmlz_file.unlink()
                 except OSError as e:
                     print(f"Warning: Could not delete incomplete output HTMLZ file '{output_htmlz_file}': {e}")
-            return None
+            return None, None, None
 
     except FileNotFoundError:
         # This would happen if ebook_convert_exe path was somehow invalid despite earlier checks.
         print(f"ERROR: ebook-convert executable not found at '{ebook_convert_exe}'. This shouldn't happen if get_calibre_ebook_convert_path worked.")
-        return None
+        return None, None, None
     except subprocess.TimeoutExpired:
         print("ERROR: Calibre conversion timed out.")
-        return None
+        return None, None, None
     except Exception as e:
         print(f"ERROR: An unexpected error occurred during Calibre conversion: {e}")
         traceback.print_exc()
-        return None
+        return None, None, None
 
 
-def extract_chapters_from_calibre_html(html_file_path: str) -> list:
+def extract_chapters_and_metadata_from_calibre_html(html_file_path: str, opf_file_path: str | None) -> tuple[list, dict]:
     """
     Parses an HTML file (presumably generated by Calibre) and extracts chapters.
-    Chapters are identified by h1 or h2 tags.
+    Also parses the associated metadata.opf file for book metadata.
+    Chapters are identified by h1 or h2 tags in the HTML.
+
+    Args:
+        html_file_path (str): Path to the HTML file.
+        opf_file_path (str | None): Path to the metadata.opf file.
+
+    Returns:
+        tuple[list, dict]: A list of chapter objects (SimpleNamespace) and
+                           a dictionary containing extracted metadata (e.g., title, creator).
     """
     chapters = []
+    metadata = {
+        'title': 'Untitled Book',
+        'creator': 'Unknown Author',
+        'language': 'en',
+        'subjects': [],
+        'rights': '',
+        'publisher': '',
+        'date': ''
+    }
     current_chapter_title = "Introduction" # Default for content before the first heading
     current_chapter_content = []
     chapter_index_counter = 0
 
+    # Parse metadata.opf first
+    if opf_file_path and Path(opf_file_path).exists():
+        try:
+            import xml.etree.ElementTree as ET
+            tree = ET.parse(opf_file_path)
+            root = tree.getroot()
+            ns = {
+                'opf': 'http://www.idpf.org/2007/opf',
+                'dc': 'http://purl.org/dc/elements/1.1/'
+            }
+
+            title_tag = root.find('.//dc:title', ns)
+            if title_tag is not None and title_tag.text:
+                metadata['title'] = title_tag.text.strip()
+
+            creator_tag = root.find('.//dc:creator[@opf:role="aut"]', ns)
+            if creator_tag is None: # Fallback if role="aut" is not present
+                creator_tag = root.find('.//dc:creator', ns)
+            if creator_tag is not None and creator_tag.text:
+                metadata['creator'] = creator_tag.text.strip()
+                # Attempt to get file-as for sorting if present
+                file_as = creator_tag.get('{http://www.idpf.org/2007/opf}file-as')
+                if file_as:
+                    metadata['creator_sort'] = file_as.strip()
+
+
+            lang_tag = root.find('.//dc:language', ns)
+            if lang_tag is not None and lang_tag.text:
+                metadata['language'] = lang_tag.text.strip().lower()
+
+            for subject_tag in root.findall('.//dc:subject', ns):
+                if subject_tag.text:
+                    metadata['subjects'].append(subject_tag.text.strip())
+
+            rights_tag = root.find('.//dc:rights', ns)
+            if rights_tag is not None and rights_tag.text:
+                metadata['rights'] = rights_tag.text.strip()
+
+            publisher_tag = root.find('.//dc:publisher', ns)
+            if publisher_tag is not None and publisher_tag.text:
+                metadata['publisher'] = publisher_tag.text.strip()
+
+            date_tag = root.find('.//dc:date', ns)
+            if date_tag is not None and date_tag.text:
+                metadata['date'] = date_tag.text.strip()
+
+            print(f"Successfully parsed metadata from '{opf_file_path}': {metadata['title']} by {metadata['creator']}")
+        except ET.ParseError as e_xml:
+            print(f"Warning: Could not parse '{opf_file_path}': {e_xml}")
+        except Exception as e_opf:
+            print(f"Warning: Error processing '{opf_file_path}': {e_opf}")
+            traceback.print_exc()
+    else:
+        print(f"Warning: metadata.opf file not provided or not found at '{opf_file_path}'. Using default metadata.")
+
+
+    # Now parse HTML for chapters
     try:
         with open(html_file_path, 'r', encoding='utf-8') as f:
-            soup = BeautifulSoup(f, 'html.parser') # Using html.parser, can switch to lxml if needed
+            soup = BeautifulSoup(f, 'html.parser')
 
-        # Try to get the main book title from <title> tag or first prominent <h1>
-        book_title_tag = soup.find('title')
-        book_overall_title = book_title_tag.string.strip() if book_title_tag else "Untitled Book"
+        # Use metadata title as book_overall_title if available, else from HTML title
+        book_overall_title = metadata['title']
+        if book_overall_title == 'Untitled Book': # Check if it's still the default
+            html_title_tag = soup.find('title')
+            if html_title_tag and html_title_tag.string:
+                book_overall_title = html_title_tag.string.strip()
 
-        # Heuristic: Content often resides in <body> or a main <div role="main"> or <article>
-        # For simplicity, we'll process all relevant tags within body.
+
         content_body = soup.body if soup.body else soup
 
         if not content_body:
             print(f"Warning: Could not find <body> or main content in {html_file_path}. No chapters extracted.")
-            return []
+            return [], metadata
 
         # Relevant tags for content extraction, similar to EPUB processing
         # but chapters are delimited by h1/h2 in the flow of these tags.
@@ -898,20 +1161,23 @@ def extract_chapters_from_calibre_html(html_file_path: str) -> list:
         # If no chapters were found (e.g. no h1/h2 tags), treat the whole content as one chapter
         if not chapters and content_body:
             all_text = content_body.get_text(separator='\n', strip=True)
-            if all_text:
+            if all_text: # Ensure there's actual text before creating a chapter
                 chapters.append(create_chapter_object(book_overall_title or "Full Text", all_text, 0))
 
-        print(f"Extracted {len(chapters)} chapters from Calibre HTML output.")
-        # For debugging, print chapter titles and lengths
-        # for chap in chapters:
-        #    print(f"  - Title: {chap.short_name}, Length: {len(chap.extracted_text)}")
+        if chapters: # Only print if chapters were actually extracted
+            print(f"Extracted {len(chapters)} chapters from Calibre HTML output.")
+        elif not content_body:
+            pass # Already warned about missing body
+        else:
+            print(f"No distinct chapters (h1/h2) found in HTML, and no fallback content extracted from {html_file_path}.")
 
-        return chapters
+
+        return chapters, metadata
 
     except FileNotFoundError:
         print(f"ERROR: HTML file not found for chapter extraction: {html_file_path}")
-        return []
+        return [], metadata # Return empty chapters list and current metadata
     except Exception as e:
         print(f"ERROR: Failed to parse or extract chapters from HTML file '{html_file_path}': {e}")
         traceback.print_exc()
-        return []
+        return [], metadata # Return empty chapters list and current metadata
