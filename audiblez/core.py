@@ -1104,37 +1104,34 @@ def extract_chapters_and_metadata_from_calibre_html(html_file_path: str, opf_fil
             chapter_obj.get_type = lambda: "calibre_html_chapter" # Dummy type
             return chapter_obj
 
-        # Improved chapter splitting logic
-        sections = []
-        current_section = None
-        for element in content_body.find_all(['h1', 'h2', 'p', 'div', 'ul', 'ol', 'blockquote']):
-            if element.name in ['h1', 'h2']:
-                if current_section:
-                    sections.append(current_section)
-                current_section = {'title': element.get_text(strip=True), 'content': []}
-            elif current_section:
-                current_section['content'].append(element.get_text(strip=True))
-
-        if current_section:
-            sections.append(current_section)
-
-        # Filter sections to identify real chapters
+        # New chapter splitting logic using find_next_siblings to avoid duplication
+        chapter_headings = content_body.find_all(['h1', 'h2'])
         chapter_index_counter = 0
-        for section in sections:
-            title = section['title']
-            content = '\n'.join(section['content']).strip()
+
+        for heading in chapter_headings:
+            title = heading.get_text(strip=True)
             
-            # Heuristics to identify chapters
+            content_tags = []
+            for sibling in heading.find_next_siblings():
+                if sibling.name in ['h1', 'h2']:
+                    break  # Stop at the next chapter heading
+                content_tags.append(sibling)
+            
+            # Extract text from the collected tags for this chapter
+            content = '\n'.join([tag.get_text(separator='\n', strip=True) for tag in content_tags]).strip()
+
+            # Heuristics to identify real chapters
             is_likely_chapter = (
                 re.search(r'^(chapter|part|book)\s*\d+', title, re.IGNORECASE) or
                 re.search(r'^\d+', title) or
-                len(content) > 500 # Assume long sections are chapters
+                len(content) > 500  # Assume long sections are chapters
             )
             
             is_likely_not_chapter = (
                 'contents' in title.lower() or
                 'title page' in title.lower() or
-                'introduction' in title.lower()
+                'copyright' in title.lower() or
+                'introduction' in title.lower() and len(content) < 1500 # Short intros are not chapters
             )
 
             if is_likely_chapter and not is_likely_not_chapter:
