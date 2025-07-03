@@ -75,7 +75,8 @@ def set_espeak_library():
 
 def main(file_path, voice, pick_manually, speed, output_folder='.',
          max_chapters=None, max_sentences=None, selected_chapters=None, post_event=None,
-         calibre_metadata: dict | None = None, calibre_cover_image_path: str | None = None):
+         calibre_metadata: dict | None = None, calibre_cover_image_path: str | None = None,
+         m4b_assembly_method: str = 'original'):
     if post_event: post_event('CORE_STARTED')
     load_spacy()
     if output_folder != '.':
@@ -257,7 +258,7 @@ def main(file_path, voice, pick_manually, speed, output_folder='.',
     if has_ffmpeg:
         # Use the original input filename (which includes original extension) for M4B naming logic
         create_index_file(title, creator, chapter_wav_files, output_folder)
-        create_m4b(chapter_wav_files, Path(file_path).name, cover_image, output_folder) # Pass original filename
+        create_m4b(chapter_wav_files, Path(file_path).name, cover_image, output_folder, m4b_assembly_method)
         if post_event: post_event('CORE_FINISHED')
     else:
         if post_event: post_event('CORE_FINISHED', error_message="ffmpeg not found, M4B not created.")
@@ -407,97 +408,149 @@ def concat_wavs_with_ffmpeg(chapter_files, output_folder, filename):
     return concat_file_path
 
 
-def create_m4b(chapter_files, original_input_filename: str, cover_image: bytes | None, output_folder: str):
-    # original_input_filename is the full name like "mybook.epub" or "another.mobi"
-    concat_file_path = concat_wavs_with_ffmpeg(chapter_files, output_folder, original_input_filename)
+def concat_wavs_with_ffmpeg_crispy(chapter_files: list[Path], output_folder: str, temp_concat_filename: str) -> Path:
+    """
+    Concatenates WAV files into a single temporary WAV file using relative paths.
+    This is the 'Extra Crispy' method, designed to be more robust on Windows.
+    """
+    output_path = Path(output_folder)
+    wav_list_filename = "crispy_wav_list.txt"
+    wav_list_path = output_path / wav_list_filename
+    temp_concat_wav_path = output_path / temp_concat_filename
 
-    # Derive M4B filename from the original input filename's stem
-    m4b_basename = Path(original_input_filename).stem + ".m4b"
-    final_filename = Path(output_folder) / m4b_basename
+    try:
+        with open(wav_list_path, 'w', encoding='utf-8') as f:
+            for wav_file_abs in chapter_files:
+                # Use relative paths in the list file
+                wav_file_relative = wav_file_abs.relative_to(output_path)
+                f.write(f"file '{wav_file_relative.as_posix()}'\n")
 
-    chapters_txt_path = Path(output_folder) / "chapters.txt"
-    print(f"Creating M4B file: {final_filename}")
+        command = [
+            'ffmpeg', '-y', '-f', 'concat', '-safe', '0',
+            '-i', wav_list_filename,
+            '-c', 'copy', temp_concat_filename
+        ]
 
-    temp_cover_file_path = None # To keep track of temporary cover file for cleanup
-    ffmpeg_command = [
-        'ffmpeg',
-        '-y',  # Overwrite output
-        '-i', str(concat_file_path),  # Input audio (Input 0)
-        '-i', str(chapters_txt_path),  # Input chapters (Input 1)
-    ]
+        print(f"Executing 'Extra Crispy' WAV concatenation in '{output_folder}': {' '.join(command)}")
+        # Execute ffmpeg with cwd=output_folder to use relative paths
+        proc = subprocess.run(command, cwd=output_folder, capture_output=True, text=True, check=True)
+        print("Concatenation successful.")
 
-    cover_input_index = 2 # Default starting index for cover if added
+    except subprocess.CalledProcessError as e:
+        print(f"ERROR: 'Extra Crispy' WAV concatenation failed with exit code {e.returncode}.")
+        print(f"ffmpeg stdout:\n{e.stdout}")
+        print(f"ffmpeg stderr:\n{e.stderr}")
+        raise  # Re-raise the exception to be caught by create_m4b
+    except Exception as e:
+        print(f"An unexpected error occurred during 'Extra Crispy' concatenation: {e}")
+        raise
+    finally:
+        # Clean up the list file
+        if wav_list_path.exists():
+            try:
+                wav_list_path.unlink()
+            except OSError as e:
+                print(f"Warning: Could not delete temp list file '{wav_list_path}': {e}")
 
-    if cover_image:
-        # It's generally safer to write the cover to a temp file with a proper extension
-        # that ffmpeg understands (e.g., .jpg, .png).
-        # We'll try to infer the type, default to jpg.
-        # A more robust way would be to use a library like 'filetype' or check magic numbers.
-        # For now, assume common types or let ffmpeg figure it out if written as .jpg.
-        # Pillow can be used to save it in a known format if we want to be very sure.
-        # For this scope, writing raw bytes with a common extension:
-        temp_cover_filename_in_output = "temp_cover_for_m4b.jpg" # ffmpeg often prefers common extensions
-        temp_cover_file_path = Path(output_folder) / temp_cover_filename_in_output
-        try:
-            with open(temp_cover_file_path, 'wb') as f_cover:
-                f_cover.write(cover_image)
+    return temp_concat_wav_path
 
+
+def create_m4b(chapter_files: list[str], original_input_filename: str, cover_image: bytes | None, output_folder: str, assembly_method: str = 'original'):
+    if not chapter_files:
+        print("No chapter files to process for M4B creation.")
+        return
+
+    concat_file_path = None
+    temp_m4b_filepath = None
+    temp_cover_file_path = None
+
+    try:
+        if assembly_method == 'crispy':
+            print("Using 'Extra Crispy' M4B assembly method.")
+            chapter_paths = [Path(f) for f in chapter_files]
+            concat_file_path = concat_wavs_with_ffmpeg_crispy(chapter_paths, output_folder, "temp_concat.wav")
+        else:
+            print("Using 'Original' M4B assembly method.")
+            concat_file_path = concat_wavs_with_ffmpeg(chapter_files, output_folder, original_input_filename)
+
+        if not concat_file_path or not concat_file_path.exists():
+            raise RuntimeError(f"Concatenated audio file was not created: {concat_file_path}")
+
+        output_path = Path(output_folder)
+        final_m4b_basename = Path(original_input_filename).stem + ".m4b"
+        final_filename = output_path / final_m4b_basename
+        temp_m4b_basename = "temp_output_for_m4b.m4b"
+        temp_m4b_filepath = output_path / temp_m4b_basename
+        chapters_txt_path = output_path / "chapters.txt"
+        print(f"Creating M4B file: {final_filename}")
+
+        ffmpeg_command = [
+            'ffmpeg', '-y',
+            '-i', str(concat_file_path.relative_to(output_path).as_posix()),
+            '-i', str(chapters_txt_path.relative_to(output_path).as_posix()),
+        ]
+        cover_input_index = 2
+
+        if cover_image:
+            temp_cover_filename_in_output = "temp_cover_for_m4b.jpg"
+            temp_cover_file_path = output_path / temp_cover_filename_in_output
+            try:
+                with open(temp_cover_file_path, 'wb') as f_cover:
+                    f_cover.write(cover_image)
+                ffmpeg_command.extend(['-i', str(temp_cover_file_path.relative_to(output_path).as_posix())])
+            except Exception as e:
+                print(f"Warning: Could not write temporary cover file: {e}. Proceeding without cover.")
+                temp_cover_file_path = None
+                cover_image = None
+
+        ffmpeg_command.extend(['-map', '0:a', '-map_metadata', '1'])
+
+        if cover_image and temp_cover_file_path:
             ffmpeg_command.extend([
-                '-i', str(temp_cover_file_path), # Cover image (Input 2 or higher)
+                '-map', f'{cover_input_index}:v',
+                '-disposition:v', 'attached_pic',
+                '-c:v', 'mjpeg',
             ])
-            # Cover image args for mapping will be added later
-        except Exception as e:
-            print(f"Warning: Could not write temporary cover file: {e}. Proceeding without cover.")
-            temp_cover_file_path = None # Ensure it's None if write failed
-            cover_image = None # Nullify cover_image to prevent mapping attempts
 
-    # Add mapping arguments
-    ffmpeg_command.extend([
-        '-map', '0:a',                # Map audio from input 0
-        '-map_metadata', '1',         # Map metadata from input 1 (chapters.txt)
-    ])
-
-    if cover_image and temp_cover_file_path: # If cover was successfully prepared
         ffmpeg_command.extend([
-            '-map', f'{cover_input_index}:v',      # Map video stream from the cover input
-            '-disposition:v', 'attached_pic',
-            '-c:v', 'mjpeg', # Or copy if the source is known to be jpeg/png. mjpeg is safer for wider input.
-                              # Using 'copy' assumes the temp_cover_file_path is already a valid video stream for mp4
-                              # 'mjpeg' will re-encode it, which is more robust for arbitrary image inputs.
+            '-c:a', 'aac', '-b:a', '64k', '-f', 'mp4',
+            str(temp_m4b_filepath.relative_to(output_path).as_posix())
         ])
 
-    ffmpeg_command.extend([
-        '-c:a', 'aac',                # Convert audio to AAC
-        '-b:a', '64k',                # Reduce audio bitrate
-        '-f', 'mp4',                  # Output as M4B (mp4 container)
-        str(final_filename)           # Output file
-    ])
+        print(f"Executing ffmpeg command in '{output_folder}': {' '.join(ffmpeg_command)}")
+        proc = subprocess.run(ffmpeg_command, cwd=output_folder, capture_output=True, text=True, check=True)
 
-    print(f"Executing ffmpeg command: {' '.join(ffmpeg_command)}")
-    proc = subprocess.run(ffmpeg_command, capture_output=True, text=True)
+        if temp_m4b_filepath.exists():
+            if final_filename.exists():
+                final_filename.unlink()
+            temp_m4b_filepath.rename(final_filename)
+            print(f"'{final_filename}' created successfully. Enjoy your audiobook.")
+            print("Feel free to delete the intermediary .wav chapter files; the .m4b is all you need.")
+        else:
+            raise RuntimeError(f"ffmpeg seemed to succeed but the output file '{temp_m4b_filepath}' was not found.")
 
-    if proc.returncode != 0:
-        print(f"Error creating M4B file. ffmpeg exit code: {proc.returncode}")
-        print(f"ffmpeg stdout:\n{proc.stdout}")
-        print(f"ffmpeg stderr:\n{proc.stderr}")
-    else:
-        print(f"'{final_filename}' created successfully. Enjoy your audiobook.")
-        print("Feel free to delete the intermediary .wav chapter files; the .m4b is all you need.")
-
-    # Cleanup
-    if concat_file_path.exists():
-        try: concat_file_path.unlink()
-        except OSError as e: print(f"Warning: Could not delete temp concat file '{concat_file_path}': {e}")
-
-    if temp_cover_file_path and temp_cover_file_path.exists():
-        try: temp_cover_file_path.unlink()
-        except OSError as e: print(f"Warning: Could not delete temporary cover file '{temp_cover_file_path}': {e}")
-
-    # This part was outside the original function, seems like a typo or misplaced.
-    # Path(concat_file_path).unlink() # This is redundant if concat_file_path.unlink() is called above
-    if proc.returncode == 0: # This check is now inside the function
-        print(f'{final_filename} created. Enjoy your audiobook.')
-        print('Feel free to delete the intermediary .wav chapter files, the .m4b is all you need.')
+    except (subprocess.CalledProcessError, RuntimeError, FileNotFoundError) as e:
+        print(f"ERROR: M4B creation failed. Reason: {e}")
+        if isinstance(e, subprocess.CalledProcessError):
+            print(f"ffmpeg stdout:\n{e.stdout}")
+            print(f"ffmpeg stderr:\n{e.stderr}")
+    finally:
+        print("Cleaning up temporary files...")
+        if concat_file_path and concat_file_path.exists():
+            try:
+                concat_file_path.unlink()
+            except OSError as e:
+                print(f"Warning: Could not delete temp concat file '{concat_file_path}': {e}")
+        if temp_cover_file_path and temp_cover_file_path.exists():
+            try:
+                temp_cover_file_path.unlink()
+            except OSError as e:
+                print(f"Warning: Could not delete temporary cover file '{temp_cover_file_path}': {e}")
+        if temp_m4b_filepath and temp_m4b_filepath.exists():
+            try:
+                temp_m4b_filepath.unlink()
+            except OSError as e:
+                print(f"Warning: Could not delete temporary m4b file '{temp_m4b_filepath}': {e}")
 
 
 def probe_duration(file_name):
