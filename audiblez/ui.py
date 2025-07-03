@@ -1310,7 +1310,7 @@ class MainWindow(wx.Frame):
 
         # self.good_chapters_list should be available here, set in open_epub
         for i, chapter in enumerate(document_chapters_list): # Use the passed argument
-            auto_selected = chapter in self.good_chapters_list
+            auto_selected = chapter.is_selected
             table.Append(['', chapter.short_name, f"{len(chapter.extracted_text):,}"])
             if auto_selected:
                 table.CheckItem(i)
@@ -1839,7 +1839,7 @@ class MainWindow(wx.Frame):
             self.selected_book = None
 
             self.document_chapters = extracted_chapters
-            self.good_chapters_list = list(self.document_chapters)
+            self.good_chapters_list = [ch for ch in self.document_chapters if ch.is_selected]
 
             if self.document_chapters:
                 self.selected_chapter = self.document_chapters[0]

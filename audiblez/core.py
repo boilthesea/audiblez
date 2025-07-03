@@ -1151,6 +1151,11 @@ def extract_chapters_and_metadata_from_calibre_html(html_file_path: str, opf_fil
         else:
             print(f"No distinct chapters (h1/h2) found in HTML, and no fallback content extracted from {html_file_path}.")
 
+        # Deselect chapters with "gutenberg" in the title
+        for chapter in chapters:
+            if 'gutenberg' in chapter.title.lower():
+                chapter.is_selected = False
+                print(f"Deselecting chapter '{chapter.title}' due to 'gutenberg' in title.")
 
         return chapters, metadata
 
