@@ -1755,11 +1755,22 @@ class MainWindow(wx.Frame):
 
         # Define the callback for asking user for Calibre path (if needed by core functions)
         def ask_user_for_calibre_path_gui():
-            with wx.DirDialog(self, "Select Calibre Installation Directory",
-                               style=wx.DD_DEFAULT_STYLE | wx.DD_DIR_MUST_EXIST) as dirDialog:
-                if dirDialog.ShowModal() == wx.ID_CANCEL:
-                    return None # User cancelled
-                return dirDialog.GetPath()
+            message = "Select the 'ebook-convert' executable"
+            if platform.system() == "Windows":
+                wildcard = "ebook-convert executable (ebook-convert.exe)|ebook-convert.exe|All files (*.*)|*.*"
+                message += " (usually in C:\\Program Files\\Calibre2)"
+            else:
+                wildcard = "ebook-convert executable (ebook-convert)|ebook-convert|All files (*.*)|*.*"
+                message += " (usually in /Applications/calibre.app/Contents/MacOS or /usr/bin)"
+
+            with wx.FileDialog(self, message, wildcard=wildcard,
+                               style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST) as fileDialog:
+                if fileDialog.ShowModal() == wx.ID_CANCEL:
+                    return None  # User cancelled
+                
+                # Return the directory containing the selected file
+                selected_path = Path(fileDialog.GetPath())
+                return str(selected_path.parent)
 
         # 1. Prompt user to select an ebook file
         # Allow various ebook formats Calibre can handle

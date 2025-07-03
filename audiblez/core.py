@@ -732,38 +732,26 @@ def get_calibre_ebook_convert_path(ui_callback_for_path_selection=None) -> str |
         user_selected_calibre_dir_str = ui_callback_for_path_selection()
         if user_selected_calibre_dir_str:
             user_selected_calibre_dir = Path(user_selected_calibre_dir_str)
-            # Common locations for ebook-convert within a Calibre installation directory
-            possible_locations = [
-                user_selected_calibre_dir / "ebook-convert",
-                user_selected_calibre_dir / "Calibre2" / "ebook-convert" # Windows common structure
-            ]
-            if platform.system() == "Windows":
-                possible_locations = [
-                    user_selected_calibre_dir / "ebook-convert.exe",
-                    user_selected_calibre_dir / "Calibre2" / "ebook-convert.exe"
-                ]
+            exe_name = "ebook-convert.exe" if platform.system() == "Windows" else "ebook-convert"
+            debug_exe_name = "calibre-debug.exe" if platform.system() == "Windows" else "calibre-debug"
+            
+            ebook_convert_path = user_selected_calibre_dir / exe_name
+            calibre_debug_path = user_selected_calibre_dir / debug_exe_name
 
-            found_path = None
-            for loc in possible_locations:
-                debug_exe_name = "calibre-debug.exe" if platform.system() == "Windows" else "calibre-debug"
-                calibre_parent_dir = loc.parent
-                if loc.exists() and loc.is_file() and (calibre_parent_dir / debug_exe_name).exists():
-                    found_path = str(loc)
-                    print(f"User selected Calibre directory. Validated ebook-convert at: {found_path}")
-                    save_user_setting('calibre_ebook_convert_path', found_path)
-                    return found_path
-
-            if not found_path:
-                 # Check if ebook-convert is directly in the selected folder, even if calibre-debug isn't (less strict)
-                potential_exe = user_selected_calibre_dir / ("ebook-convert.exe" if platform.system() == "Windows" else "ebook-convert")
-                if potential_exe.exists() and potential_exe.is_file():
-                    print(f"User selected Calibre directory. Found ebook-convert at: {potential_exe}, but validation with calibre-debug failed. Using it anyway.")
-                    save_user_setting('calibre_ebook_convert_path', str(potential_exe))
-                    return str(potential_exe)
-
-                print(f"ebook-convert or calibre-debug not found in the selected directory or common subdirectories: {user_selected_calibre_dir_str}")
-                # wx.CallAfter(wx.MessageBox, f"Could not find 'ebook-convert' and 'calibre-debug' in the selected directory:\n{user_selected_calibre_dir_str}\nPlease ensure you select the main Calibre application folder.", "Calibre Verification Failed", wx.OK | wx.ICON_ERROR)
-                # The UI callback should handle user feedback for this case.
+            if ebook_convert_path.exists() and ebook_convert_path.is_file() and calibre_debug_path.exists():
+                found_path = str(ebook_convert_path)
+                print(f"User selected Calibre directory. Validated ebook-convert at: {found_path}")
+                save_user_setting('calibre_ebook_convert_path', found_path)
+                return found_path
+            else:
+                # Provide more specific feedback if validation fails
+                if not ebook_convert_path.exists():
+                    print(f"Validation failed: '{exe_name}' not found in '{user_selected_calibre_dir}'.")
+                if not calibre_debug_path.exists():
+                    print(f"Validation failed: '{debug_exe_name}' not found in '{user_selected_calibre_dir}'.")
+                
+                # The UI itself should show an error message to the user.
+                # This function's responsibility is to return None on failure.
                 return None
     else:
         print("Calibre 'ebook-convert' not found in PATH or DB. No UI callback provided to ask user.")
