@@ -46,7 +46,8 @@ def create_tables(conn: sqlite3.Connection):
             speed REAL,
             custom_rate INTEGER,
             next_scheduled_run INTEGER, -- Stores Unix timestamp for next schedule
-            calibre_ebook_convert_path TEXT -- Stores path to ebook-convert
+            calibre_ebook_convert_path TEXT, -- Stores path to ebook-convert
+            m4b_assembly_method TEXT
         )
     """)
 
@@ -129,7 +130,7 @@ def save_user_setting(setting_name: str, setting_value):
         cursor.execute("SELECT id FROM user_settings WHERE id = 1")
         row = cursor.fetchone()
 
-        valid_columns = ["engine", "voice", "speed", "custom_rate", "next_scheduled_run", "calibre_ebook_convert_path"]
+        valid_columns = ["engine", "voice", "speed", "custom_rate", "next_scheduled_run", "calibre_ebook_convert_path", "m4b_assembly_method"]
         if setting_name not in valid_columns:
             print(f"Error: Invalid setting_name '{setting_name}' for update/insert.")
             return # Or raise an error
@@ -172,7 +173,7 @@ def load_user_setting(setting_name: str):
     conn = connect_db()
     cursor = conn.cursor()
     try:
-        valid_columns = ["engine", "voice", "speed", "custom_rate", "next_scheduled_run", "calibre_ebook_convert_path", "id"] # id for validation
+        valid_columns = ["engine", "voice", "speed", "custom_rate", "next_scheduled_run", "calibre_ebook_convert_path", "m4b_assembly_method", "id"] # id for validation
         if setting_name not in valid_columns:
             print(f"Error: Invalid setting_name '{setting_name}' for load.")
             # Pass to let SQLite handle "no such column" if it's truly an invalid/new column
@@ -202,7 +203,7 @@ def load_all_user_settings() -> dict:
     settings = {}
     try:
         # Assuming settings are in a single row with id = 1
-        cursor.execute("SELECT engine, voice, speed, custom_rate, next_scheduled_run, calibre_ebook_convert_path FROM user_settings WHERE id = 1")
+        cursor.execute("SELECT engine, voice, speed, custom_rate, next_scheduled_run, calibre_ebook_convert_path, m4b_assembly_method FROM user_settings WHERE id = 1")
         row = cursor.fetchone()
         if row:
             settings = {
@@ -212,6 +213,7 @@ def load_all_user_settings() -> dict:
                 "custom_rate": row[3],
                 "next_scheduled_run": row[4],
                 "calibre_ebook_convert_path": row[5],
+                "m4b_assembly_method": row[6],
             }
         return settings
     except sqlite3.Error as e:

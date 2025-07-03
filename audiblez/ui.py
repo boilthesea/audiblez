@@ -66,6 +66,7 @@ class MainWindow(wx.Frame):
         self.selected_voice = None
         self.selected_speed = 1.0 # Default speed
         self.custom_rate = None # Default custom rate
+        self.m4b_assembly_method = 'original' # Default M4B assembly method
 
         self.queue_processing_active = False
         self.current_queue_item_index = -1 # To track which item in self.queue_items is being processed
@@ -542,6 +543,42 @@ class MainWindow(wx.Frame):
         sizer.Add(output_folder_label, pos=(3, 0), flag=wx.ALL, border=border)
         sizer.Add(self.output_folder_text_ctrl, pos=(3, 1), flag=wx.ALL | wx.EXPAND, border=border)
         sizer.Add(output_folder_button, pos=(4, 1), flag=wx.ALL, border=border)
+
+        # M4B Assembly Method
+        m4b_assembly_label = wx.StaticText(panel, label="M4B Assembly:")
+        m4b_assembly_panel = wx.Panel(panel)
+        m4b_assembly_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        m4b_assembly_panel.SetSizer(m4b_assembly_sizer)
+
+        self.m4b_assembly_original_radio = wx.RadioButton(m4b_assembly_panel, label="Original", style=wx.RB_GROUP)
+        self.m4b_assembly_crispy_radio = wx.RadioButton(m4b_assembly_panel, label="Extra Crispy")
+
+        help_icon = wx.StaticText(m4b_assembly_panel, label="❓")
+        help_icon.SetToolTip("Original method is time-tested. 'Extra Crispy' is best used when experiencing failures to produce an m4b under the original method, especially in Windows.")
+
+        m4b_assembly_sizer.Add(self.m4b_assembly_original_radio, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 5)
+        m4b_assembly_sizer.Add(self.m4b_assembly_crispy_radio, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 5)
+        m4b_assembly_sizer.Add(help_icon, 0, wx.ALIGN_CENTER_VERTICAL)
+
+        # Load saved setting or set default
+        saved_m4b_method = self.user_settings.get('m4b_assembly_method', 'original')
+        if saved_m4b_method == 'crispy':
+            self.m4b_assembly_crispy_radio.SetValue(True)
+            self.m4b_assembly_method = 'crispy'
+        else:
+            self.m4b_assembly_original_radio.SetValue(True)
+            self.m4b_assembly_method = 'original'
+
+        def on_select_m4b_method(event, method):
+            self.m4b_assembly_method = method
+            db.save_user_setting('m4b_assembly_method', method)
+            print(f"M4B Assembly method set to {method} and saved.")
+
+        self.m4b_assembly_original_radio.Bind(wx.EVT_RADIOBUTTON, lambda event: on_select_m4b_method(event, 'original'))
+        self.m4b_assembly_crispy_radio.Bind(wx.EVT_RADIOBUTTON, lambda event: on_select_m4b_method(event, 'crispy'))
+
+        sizer.Add(m4b_assembly_label, pos=(5, 0), flag=wx.ALL | wx.ALIGN_CENTER_VERTICAL, border=border)
+        sizer.Add(m4b_assembly_panel, pos=(5, 1), flag=wx.ALL, border=border)
 
     def create_synthesis_panel(self):
         # Think and identify layout issue with the folling code
@@ -1210,7 +1247,8 @@ class MainWindow(wx.Frame):
             'output_folder': output_folder,
             'selected_chapters': chapters_to_synthesize,
             'calibre_metadata': None,
-            'calibre_cover_image_path': None
+            'calibre_cover_image_path': None,
+            'm4b_assembly_method': synthesis_settings.get('m4b_assembly_method', self.m4b_assembly_method)
         }
 
         # Try to get Calibre-specific details for this queued item
@@ -1363,6 +1401,7 @@ class MainWindow(wx.Frame):
             # Initialize Calibre specific overrides to None
             'calibre_metadata_override': None,
             'calibre_cover_path_override': None,
+            'm4b_assembly_method': self.m4b_assembly_method,
         }
 
         # If the current book in UI (self.selected_file_path) was from Calibre,
@@ -1604,6 +1643,7 @@ class MainWindow(wx.Frame):
             'voice': current_voice,
             'speed': current_speed,
             'output_folder': current_output_folder,
+            'm4b_assembly_method': self.m4b_assembly_method,
         }
 
         db_queue_details = {
@@ -1691,7 +1731,8 @@ class MainWindow(wx.Frame):
             'output_folder': self.output_folder_text_ctrl.GetValue(),
             'selected_chapters': selected_chapters,
             'calibre_metadata': None, # Default to None
-            'calibre_cover_image_path': None # Default to None
+            'calibre_cover_image_path': None, # Default to None
+            'm4b_assembly_method': self.m4b_assembly_method
         }
 
         # Check if this book was loaded via Calibre by inspecting self.book_data
