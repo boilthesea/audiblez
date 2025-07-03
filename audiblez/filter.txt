@@ -46,7 +46,8 @@ Treas.|Treasurer
 Esq.|Esquire
 Jr.|Junior
 Sr.|Senior
-No.|Number
+# "No." will filter out one word sentences in addition to abbreviations, will need a logic upgrade to do this well.
+# No.|Number
 Nos.|Numbers
 Vol.|Volume
 Vols.|Volumes

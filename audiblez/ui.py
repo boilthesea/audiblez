@@ -289,6 +289,11 @@ class MainWindow(wx.Frame):
         open_epub_button.Bind(wx.EVT_BUTTON, self.on_open)
         top_sizer.Add(open_epub_button, 0, wx.ALL, 5)
 
+        # Open with Calibre button
+        open_calibre_button = wx.Button(top_panel, label="📖 Open with Calibre")
+        open_calibre_button.Bind(wx.EVT_BUTTON, self.on_open_with_calibre)
+        top_sizer.Add(open_calibre_button, 0, wx.ALL, 5)
+
         # Open Markdown .md
         # open_md_button = wx.Button(top_panel, label="📁 Open Markdown (.md)")
         # open_md_button.Bind(wx.EVT_BUTTON, self.on_open)
@@ -948,6 +953,51 @@ class MainWindow(wx.Frame):
         # else:
             # print(f"Scheduled time {datetime.fromtimestamp(scheduled_ts)} not yet reached.")
 
+    def _get_calibre_details_for_queued_item(self, item_data: dict) -> tuple[dict | None, str | None]:
+        """
+        Helper to retrieve Calibre metadata and cover path for a QUEUED item.
+        This is tricky because the queue item might have been added from a Calibre-imported book
+        that is no longer the "current" book in the UI.
+        We need to rely on information stored WITH the queue item.
+        """
+        # How 'book_data' (containing metadata and cover_path) is stored for queued Calibre items:
+        # - When "Queue Selected Book Portions" is used for a Calibre-imported book currently in UI:
+        #   The `self.book_data` (set by on_open_with_calibre) should ideally be copied into the queue_entry.
+        # - When "Queue Selected Chapters" from Staging tab is used for a Calibre-imported book:
+        #   The `db.add_staged_book` would need to store the metadata and cover_image_path from the original import.
+        #   Then `db.add_item_to_queue` (when called from `on_queue_selected_staged_chapters`)
+        #   would need to fetch this from the staged_book record and include it in the queue item's data.
+
+        # Current implementation:
+        # `on_queue_selected_book_portions` (from Chapters tab): Does NOT explicitly copy self.book_data.
+        #   It relies on `source_path` being the original Calibre input.
+        # `on_queue_selected_staged_chapters` (from Staging tab): Also relies on `source_path` if it were stored,
+        #   or needs the `staged_book_id` to trace back to original metadata/cover.
+
+        # For now, let's assume if `item_data['source_path']` was the original Calibre input
+        # and `item_data` also has `calibre_metadata` and `calibre_cover_path` directly stored
+        # (this needs to be added when item is queued).
+
+        # Check if the item itself has these details (IDEAL for queued items)
+        if isinstance(item_data.get('synthesis_settings'), dict) and \
+           item_data['synthesis_settings'].get('calibre_metadata') is not None:
+            print(f"Found Calibre details directly in queued item: {item_data['book_title']}")
+            return item_data['synthesis_settings']['calibre_metadata'], item_data['synthesis_settings'].get('calibre_cover_image_path')
+
+        # Fallback: If the item's source_path matches the currently loaded Calibre book in UI.
+        # This is less reliable for queues but might work for items queued and run immediately.
+        if hasattr(self, 'book_data') and self.book_data and \
+           'metadata' in self.book_data and \
+           item_data.get('source_path') == self.selected_file_path: # selected_file_path is the original input
+            print(f"Using current UI's Calibre data for queued item: {item_data['book_title']}")
+            return self.book_data['metadata'], self.book_data.get('cover_image_path')
+
+        # If the queue item was from a staged book, and that staged book stored its original metadata/cover.
+        # This requires `db.get_staged_book_details(item_data['staged_book_id'])` to return them.
+        # This is not yet implemented in the DB schema for staged books.
+
+        return None, None
+
 
     def on_remove_queue_item(self, event, queue_item_id):
         """Handles removal of a specific item from the queue."""
@@ -1051,6 +1101,9 @@ class MainWindow(wx.Frame):
                 continue
             chapter_obj.extracted_text = text_content
             chapter_obj.is_selected = True # All chapters here are for processing
+            # Ensure 'title' is set for chapter filename generation in core.main if 'short_name' isn't what's needed
+            if not hasattr(chapter_obj, 'title') or not chapter_obj.title:
+                 chapter_obj.title = chap_db_info.get('title', f'Chapter_{idx+1}')
             chapters_to_synthesize.append(chapter_obj)
 
         if not chapters_to_synthesize:
@@ -1063,9 +1116,29 @@ class MainWindow(wx.Frame):
             return
 
         # Prepare parameters for CoreThread
-        file_path = item_to_process.get('source_path') # Available if from "Chapters" tab
+        # `file_path` is the original input file path (e.g., mybook.epub, mybook.mobi)
+        # It's used by core.main for output filename generation.
+        file_path = item_to_process.get('source_path')
 
-        if not file_path and 'book_id' in item_to_process: # Staged item
+        # For staged items, 'source_path' might be in the main item_to_process (if queued from Chapters tab initially)
+        # or associated with the staged_book_id in the database.
+        # The `db.add_item_to_queue` for staged items currently sets `source_path` to None.
+        # We need a reliable way to get the original input filename for `core.main`.
+        if not file_path and item_to_process.get('staged_book_id'):
+            # Try to get source_path from the staged book's record in DB
+            staged_book_details = db.get_staged_book_details(item_to_process['staged_book_id'])
+            if staged_book_details and staged_book_details.get('source_path'):
+                file_path = staged_book_details['source_path']
+                print(f"Using source_path '{file_path}' from staged book record for '{book_title}'.")
+            else:
+                # Fallback: use book title to create a dummy filename if source_path is truly unavailable.
+                # This ensures core.main has *a* file_path for naming.
+                safe_book_title = "".join(c if c.isalnum() else "_" for c in book_title)
+                file_path = f"{safe_book_title}.calibre_import" # Dummy extension
+                print(f"Warning: Original source_path not found for staged item '{book_title}'. Using dummy file_path: '{file_path}' for output naming.")
+
+
+        if not file_path and 'book_id' in item_to_process: # Staged item, old check, should be covered by above
             # Attempt to use current book's path as a fallback for core.main's epub.read_epub.
             # This is primarily so core.main doesn't crash trying to read a non-existent/placeholder path.
             # The actual chapter content for TTS comes from chapters_to_synthesize.
@@ -1128,19 +1201,36 @@ class MainWindow(wx.Frame):
 
         # Note: CoreThread's post_event uses chapter.chapter_index.
         # Make sure chapters_to_synthesize have this attribute.
-        self.core_thread = CoreThread(params=dict(
-            file_path=file_path,  # This might be problematic if not correctly resolved
-            voice=voice,
-            pick_manually=False,
-            speed=speed,
-            output_folder=output_folder,
-            selected_chapters=chapters_to_synthesize,
-            # We can add a queue_item_id or book_title to params if CoreThread needs to report it back
-            # This would help on_core_finished identify which queue item finished if events become complex.
-            # For sequential processing, self.current_queue_item_index is enough for MainWindow.
-            # We also need to ensure chapter_index attribute is on each chapter object for progress.
-            # For chapters from staging, we added a dummy one.
-        ))
+
+        core_params = {
+            'file_path': file_path,
+            'voice': voice,
+            'pick_manually': False,
+            'speed': speed,
+            'output_folder': output_folder,
+            'selected_chapters': chapters_to_synthesize,
+            'calibre_metadata': None,
+            'calibre_cover_image_path': None
+        }
+
+        # Try to get Calibre-specific details for this queued item
+        # This helper function encapsulates the logic to find them if they exist for this item.
+        # Modification needed: `_get_calibre_details_for_queued_item` needs to be robust.
+        # It should check if the item was originally a Calibre import and if its metadata/cover path
+        # were stored with the queue item or can be retrieved via staged_book_id.
+
+        # For the purpose of this step, we assume `item_to_process` MIGHT have these if stored during queueing.
+        # This part needs to be solidified when queueing Calibre books:
+        # Ensure 'calibre_metadata_override' and 'calibre_cover_path_override' are stored in `item_to_process['synthesis_settings']` if applicable.
+        queued_calibre_meta = item_to_process.get('synthesis_settings', {}).get('calibre_metadata_override')
+        queued_calibre_cover = item_to_process.get('synthesis_settings', {}).get('calibre_cover_path_override')
+
+        if queued_calibre_meta:
+            core_params['calibre_metadata'] = queued_calibre_meta
+            core_params['calibre_cover_image_path'] = queued_calibre_cover # May be None
+            print(f"Using Calibre metadata/cover override from queued item for: {book_title}")
+
+        self.core_thread = CoreThread(params=core_params)
         self.core_thread.start()
         # The actual removal from self.queue_items and moving to next happens in on_core_finished
 
@@ -1220,7 +1310,7 @@ class MainWindow(wx.Frame):
 
         # self.good_chapters_list should be available here, set in open_epub
         for i, chapter in enumerate(document_chapters_list): # Use the passed argument
-            auto_selected = chapter in self.good_chapters_list
+            auto_selected = chapter.is_selected
             table.Append(['', chapter.short_name, f"{len(chapter.extracted_text):,}"])
             if auto_selected:
                 table.CheckItem(i)
@@ -1270,7 +1360,21 @@ class MainWindow(wx.Frame):
             'voice': current_voice,
             'speed': current_speed,
             'output_folder': current_output_folder,
+            # Initialize Calibre specific overrides to None
+            'calibre_metadata_override': None,
+            'calibre_cover_path_override': None,
         }
+
+        # If the current book in UI (self.selected_file_path) was from Calibre,
+        # and has self.book_data, then pass this data for the queue item.
+        if hasattr(self, 'book_data') and self.book_data and \
+           'metadata' in self.book_data and self.selected_file_path == self.selected_file_path: # Ensure it's the current book
+            # Check if 'metadata' indicates it's from Calibre (e.g., by a specific key or just assume if book_data exists fully)
+            # For now, if self.book_data['metadata'] exists, we assume it's Calibre data to be passed.
+            print(f"Adding Calibre-specific metadata and cover path to queue item for '{self.selected_book_title}' from Chapters tab.")
+            synthesis_settings['calibre_metadata_override'] = self.book_data['metadata']
+            synthesis_settings['calibre_cover_path_override'] = self.book_data.get('cover_image_path')
+
 
         # Create a new queue entry
         # Note: 'selected_chapter_details' stores the actual chapter objects from self.document_chapters
@@ -1574,17 +1678,39 @@ class MainWindow(wx.Frame):
         self.params_panel.Disable()
 
         self.table.EnableCheckBoxes(False)
-        for chapter_index, chapter in enumerate(self.document_chapters):
+        for chapter_index, chapter in enumerate(self.document_chapters): # document_chapters could be from EPUB or Calibre
             if chapter in selected_chapters:
                 self.set_table_chapter_status(chapter_index, "Planned")
-                self.table.SetItem(chapter_index, 0, '✔️')
+                # self.table.SetItem(chapter_index, 0, '✔️') # Checkmarking handled by table.CheckItem in create_chapters_table_panel
 
-        # self.stop_button.Show()
-        print('Starting Audiobook Synthesis', dict(file_path=file_path, voice=voice, pick_manually=False, speed=speed))
-        self.core_thread = CoreThread(params=dict(
-            file_path=file_path, voice=voice, pick_manually=False, speed=speed,
-            output_folder=self.output_folder_text_ctrl.GetValue(),
-            selected_chapters=selected_chapters))
+        core_params = {
+            'file_path': file_path, # This is the original input file path
+            'voice': voice,
+            'pick_manually': False,
+            'speed': speed,
+            'output_folder': self.output_folder_text_ctrl.GetValue(),
+            'selected_chapters': selected_chapters,
+            'calibre_metadata': None, # Default to None
+            'calibre_cover_image_path': None # Default to None
+        }
+
+        # Check if this book was loaded via Calibre by inspecting self.book_data
+        # self.book_data is set in on_open_with_calibre
+        if hasattr(self, 'book_data') and self.book_data and 'metadata' in self.book_data and 'cover_image_path' in self.book_data:
+            # This indicates a Calibre-loaded book currently in the UI
+            # We need to ensure this self.book_data corresponds to the file_path being processed.
+            # For on_start, self.selected_file_path IS file_path.
+            if self.selected_file_path == file_path:
+                print("Passing Calibre-derived metadata and cover path to core.main for single synthesis.")
+                core_params['calibre_metadata'] = self.book_data['metadata']
+                core_params['calibre_cover_image_path'] = self.book_data['cover_image_path']
+            else:
+                # This case should ideally not happen if UI state is consistent.
+                print("Warning: Mismatch between current file_path and selected_file_path for Calibre data in on_start. Proceeding without Calibre specifics.")
+
+
+        print('Starting Audiobook Synthesis', core_params)
+        self.core_thread = CoreThread(params=core_params)
         self.core_thread.start()
 
     def on_open(self, event):
@@ -1600,6 +1726,173 @@ class MainWindow(wx.Frame):
                 wx.MessageBox("Audiobook synthesis is still in progress. Please wait for it to finish.", "Audiobook Synthesis in Progress")
             else:
                 wx.CallAfter(self.open_epub, file_path)
+
+    def on_open_with_calibre(self, event):
+        from audiblez.core import get_calibre_ebook_convert_path, convert_ebook_with_calibre, extract_chapters_and_metadata_from_calibre_html
+        import tempfile
+        import shutil
+
+        # Define the GUI callback that will be passed to the core function.
+        # This callback is only invoked if the core function cannot find Calibre automatically.
+        def ask_user_for_calibre_path_gui():
+            # First, show an informational dialog.
+            info_message = (
+                "Audiblez needs to know where Calibre is installed to convert this book format.\n\n"
+                "Please locate the 'ebook-convert' program inside your Calibre installation folder.\n\n"
+                "What to look for:\n"
+                "- On Windows, this is often 'C:\\Program Files\\Calibre2\\ebook-convert.exe'.\n"
+                "- On macOS, this is usually in '/Applications/calibre.app/Contents/MacOS/ebook-convert'.\n\n"
+                "The folder containing this file should also have 'calibre-debug'."
+            )
+            dialog = wx.MessageDialog(self, info_message, "Locate Calibre Program", wx.OK | wx.CANCEL | wx.ICON_INFORMATION)
+            response = dialog.ShowModal()
+            dialog.Destroy()
+
+            if response == wx.ID_CANCEL:
+                return None # User cancelled the info dialog
+
+            # If user clicks OK, show the file picker dialog.
+            message = "Select the 'ebook-convert' executable"
+            if platform.system() == "Windows":
+                wildcard = "ebook-convert executable (ebook-convert.exe)|ebook-convert.exe|All files (*.*)|*.*"
+            else:
+                wildcard = "ebook-convert executable (ebook-convert)|ebook-convert|All files (*.*)|*.*"
+
+            with wx.FileDialog(self, message, wildcard=wildcard,
+                               style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST) as fileDialog:
+                if fileDialog.ShowModal() == wx.ID_CANCEL:
+                    return None  # User cancelled
+                
+                # Return the directory containing the selected file, as the core function expects.
+                selected_path = Path(fileDialog.GetPath())
+                return str(selected_path.parent)
+
+        # 1. Check for Calibre's existence first, prompting the user if necessary.
+        # We pass our GUI callback function here.
+        ebook_convert_exe = get_calibre_ebook_convert_path(ui_callback_for_path_selection=ask_user_for_calibre_path_gui)
+
+        # If no path was found (either automatically or by the user), abort.
+        if not ebook_convert_exe:
+            wx.MessageBox("Calibre's 'ebook-convert' tool could not be found. The process has been cancelled.",
+                          "Calibre Not Found", wx.OK | wx.ICON_ERROR)
+            return
+
+        # 2. If Calibre is found, now prompt the user to select an ebook file.
+        wildcard_str = "Ebook files (*.epub;*.mobi;*.azw;*.azw3;*.fb2;*.lit;*.pdf)|*.epub;*.mobi;*.azw;*.azw3;*.fb2;*.lit;*.pdf|All files (*.*)|*.*"
+        with wx.FileDialog(self, "Select Ebook to Convert with Calibre", wildcard=wildcard_str,
+                           style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST) as dialog:
+            if dialog.ShowModal() == wx.ID_CANCEL:
+                return # User cancelled file selection
+            input_ebook_path = dialog.GetPath()
+
+        if not input_ebook_path:
+            return
+
+        if self.synthesis_in_progress:
+            wx.MessageBox("Audiobook synthesis is in progress. Please wait for it to finish.",
+                          "Synthesis Busy", wx.OK | wx.ICON_WARNING)
+            return
+
+        # 3. Proceed with the conversion and UI update logic.
+        temp_html_output_dir = tempfile.mkdtemp(prefix="audiblez_calibre_")
+        print(f"Temporary directory for Calibre HTML output: {temp_html_output_dir}")
+
+        try:
+            wx.BeginBusyCursor()
+            # We already have the path, so we don't need to pass the callback to convert_ebook_with_calibre.
+            # It will call get_calibre_ebook_convert_path again, but it will find it in the DB or PATH now.
+            html_file_path, opf_file_path, cover_image_path = convert_ebook_with_calibre(
+                input_ebook_path,
+                temp_html_output_dir,
+                ui_callback_for_path_selection=None # Path is already found and saved.
+            )
+            wx.EndBusyCursor()
+
+            if not html_file_path:
+                wx.MessageBox(f"Failed to convert '{Path(input_ebook_path).name}' using Calibre. Check console for errors.",
+                              "Calibre Conversion Failed", wx.OK | wx.ICON_ERROR)
+                return
+
+            wx.BeginBusyCursor()
+            extracted_chapters, book_metadata = extract_chapters_and_metadata_from_calibre_html(html_file_path, opf_file_path)
+            wx.EndBusyCursor()
+
+            if not extracted_chapters:
+                title_from_meta = book_metadata.get('title', Path(input_ebook_path).stem)
+                wx.MessageBox(f"Could not extract chapters from the HTML output of '{title_from_meta}'. The book might be empty or in an unexpected format.",
+                              "Chapter Extraction Failed", wx.OK | wx.ICON_WARNING)
+
+            # ... (rest of the UI update logic is the same)
+            # Cleanup previous dynamic UI parts
+            if hasattr(self, 'splitter_left') and self.splitter_left: self.splitter_left.Destroy()
+            if hasattr(self, 'splitter_right') and self.splitter_right: self.splitter_right.Destroy()
+            self.splitter_left, self.splitter_right = None, None
+
+            self.selected_file_path = input_ebook_path
+            self.book_data = {
+                'cover_image_path': cover_image_path,
+                'metadata': book_metadata
+            }
+
+            self.selected_book_title = book_metadata.get('title', Path(input_ebook_path).stem)
+            self.selected_book_author = book_metadata.get('creator', "Unknown Author")
+            self.selected_book = None
+
+            self.document_chapters = extracted_chapters
+            self.good_chapters_list = [ch for ch in self.document_chapters if ch.is_selected]
+
+            if self.document_chapters:
+                self.selected_chapter = self.document_chapters[0]
+            else:
+                self.selected_chapter = None
+
+            self.create_notebook_and_tabs()
+            self.create_layout_for_ebook(self.splitter)
+
+            if hasattr(self, 'cover_bitmap'):
+                if cover_image_path and Path(cover_image_path).exists():
+                    try:
+                        pil_image = Image.open(cover_image_path)
+                        wx_img = wx.Image(pil_image.size[0], pil_image.size[1])
+                        if pil_image.mode == 'RGBA':
+                            pil_image_rgb = pil_image.convert('RGB')
+                            wx_img.SetData(pil_image_rgb.tobytes())
+                        else:
+                             wx_img.SetData(pil_image.convert("RGB").tobytes())
+
+                        cover_h = 200
+                        cover_w = int(cover_h * pil_image.size[0] / pil_image.size[1])
+                        if cover_w > 0 and cover_h > 0 :
+                            wx_img = wx_img.Scale(cover_w, cover_h, wx.IMAGE_QUALITY_HIGH)
+
+                        self.cover_bitmap.SetBitmap(wx_img.ConvertToBitmap())
+                        self.cover_bitmap.SetMaxSize((200, cover_h))
+                        self.book_info_panel.Layout()
+                    except Exception as e_cover:
+                        print(f"Error loading or displaying cover image '{cover_image_path}': {e_cover}")
+                        self.cover_bitmap.SetBitmap(wx.NullBitmap)
+                else:
+                    self.cover_bitmap.SetBitmap(wx.NullBitmap)
+
+            self.refresh_staging_tab()
+            self.refresh_queue_tab()
+            self.splitter.Layout()
+            self.Layout()
+
+            if extracted_chapters:
+                wx.MessageBox(f"Successfully processed '{self.selected_book_title}' using Calibre.",
+                              "Processing Complete", wx.OK | wx.ICON_INFORMATION)
+
+        finally:
+            if Path(temp_html_output_dir).exists():
+                try:
+                    shutil.rmtree(temp_html_output_dir)
+                    print(f"Cleaned up temporary directory: {temp_html_output_dir}")
+                except Exception as e:
+                    print(f"Error cleaning up temporary directory {temp_html_output_dir}: {e}")
+            if wx.IsBusy():
+                wx.EndBusyCursor()
+
 
     def on_exit(self, event):
         self.Close()
