@@ -1728,54 +1728,58 @@ class MainWindow(wx.Frame):
                 wx.CallAfter(self.open_epub, file_path)
 
     def on_open_with_calibre(self, event):
-        # Placeholder for Calibre opening logic
-        # This will eventually call core functions to find Calibre,
-        # convert the book, and then process it like an EPUB.
-        wx.MessageBox("Calibre integration is under development.", "Coming Soon", wx.OK | wx.ICON_INFORMATION)
-        # Example of what it might do:
-        # with wx.FileDialog(self, "Open Ebook with Calibre",
-        #                    wildcard="Ebook files (*.epub;*.mobi;*.azw3)|*.epub;*.mobi;*.azw3|All files (*.*)|*.*",
-        #                    style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST) as dialog:
-        #     if dialog.ShowModal() == wx.ID_CANCEL:
-        #         return
-        #     file_path = dialog.GetPath()
-        #     if not file_path:
-        #         return
-        #     if self.synthesis_in_progress:
-        #         wx.MessageBox("Audiobook synthesis is still in progress. Please wait for it to finish.", "Audiobook Synthesis in Progress")
-        #     else:
-        #         # wx.CallAfter(self.process_with_calibre, file_path) # self.process_with_calibre will be new method
-        #         print(f"File selected for Calibre processing: {file_path}")
-
-        # Import necessary core functions and modules
-        from audiblez.core import convert_ebook_with_calibre, extract_chapters_and_metadata_from_calibre_html
+        from audiblez.core import get_calibre_ebook_convert_path, convert_ebook_with_calibre, extract_chapters_and_metadata_from_calibre_html
         import tempfile
         import shutil
-        # get_calibre_ebook_convert_path is called by convert_ebook_with_calibre
 
-        # Define the callback for asking user for Calibre path (if needed by core functions)
+        # Define the GUI callback that will be passed to the core function.
+        # This callback is only invoked if the core function cannot find Calibre automatically.
         def ask_user_for_calibre_path_gui():
+            # First, show an informational dialog.
+            info_message = (
+                "Audiblez needs to know where Calibre is installed to convert this book format.\n\n"
+                "Please locate the 'ebook-convert' program inside your Calibre installation folder.\n\n"
+                "What to look for:\n"
+                "- On Windows, this is often 'C:\\Program Files\\Calibre2\\ebook-convert.exe'.\n"
+                "- On macOS, this is usually in '/Applications/calibre.app/Contents/MacOS/ebook-convert'.\n\n"
+                "The folder containing this file should also have 'calibre-debug'."
+            )
+            dialog = wx.MessageDialog(self, info_message, "Locate Calibre Program", wx.OK | wx.CANCEL | wx.ICON_INFORMATION)
+            response = dialog.ShowModal()
+            dialog.Destroy()
+
+            if response == wx.ID_CANCEL:
+                return None # User cancelled the info dialog
+
+            # If user clicks OK, show the file picker dialog.
             message = "Select the 'ebook-convert' executable"
             if platform.system() == "Windows":
                 wildcard = "ebook-convert executable (ebook-convert.exe)|ebook-convert.exe|All files (*.*)|*.*"
-                message += " (usually in C:\\Program Files\\Calibre2)"
             else:
                 wildcard = "ebook-convert executable (ebook-convert)|ebook-convert|All files (*.*)|*.*"
-                message += " (usually in /Applications/calibre.app/Contents/MacOS or /usr/bin)"
 
             with wx.FileDialog(self, message, wildcard=wildcard,
                                style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST) as fileDialog:
                 if fileDialog.ShowModal() == wx.ID_CANCEL:
                     return None  # User cancelled
                 
-                # Return the directory containing the selected file
+                # Return the directory containing the selected file, as the core function expects.
                 selected_path = Path(fileDialog.GetPath())
                 return str(selected_path.parent)
 
-        # 1. Prompt user to select an ebook file
-        # Allow various ebook formats Calibre can handle
+        # 1. Check for Calibre's existence first, prompting the user if necessary.
+        # We pass our GUI callback function here.
+        ebook_convert_exe = get_calibre_ebook_convert_path(ui_callback_for_path_selection=ask_user_for_calibre_path_gui)
+
+        # If no path was found (either automatically or by the user), abort.
+        if not ebook_convert_exe:
+            wx.MessageBox("Calibre's 'ebook-convert' tool could not be found. The process has been cancelled.",
+                          "Calibre Not Found", wx.OK | wx.ICON_ERROR)
+            return
+
+        # 2. If Calibre is found, now prompt the user to select an ebook file.
         wildcard_str = "Ebook files (*.epub;*.mobi;*.azw;*.azw3;*.fb2;*.lit;*.pdf)|*.epub;*.mobi;*.azw;*.azw3;*.fb2;*.lit;*.pdf|All files (*.*)|*.*"
-        with wx.FileDialog(self, "Open Ebook with Calibre", wildcard=wildcard_str,
+        with wx.FileDialog(self, "Select Ebook to Convert with Calibre", wildcard=wildcard_str,
                            style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST) as dialog:
             if dialog.ShowModal() == wx.ID_CANCEL:
                 return # User cancelled file selection
@@ -1789,104 +1793,86 @@ class MainWindow(wx.Frame):
                           "Synthesis Busy", wx.OK | wx.ICON_WARNING)
             return
 
-        # 2. Create a temporary directory for HTML output
+        # 3. Proceed with the conversion and UI update logic.
         temp_html_output_dir = tempfile.mkdtemp(prefix="audiblez_calibre_")
         print(f"Temporary directory for Calibre HTML output: {temp_html_output_dir}")
 
         try:
-            # Call core.convert_ebook_with_calibre
-            # Pass the GUI callback for Calibre path selection if needed
-            wx.BeginBusyCursor() # Indicate processing
-            # convert_ebook_with_calibre now returns html_path, opf_path, cover_path
+            wx.BeginBusyCursor()
+            # We already have the path, so we don't need to pass the callback to convert_ebook_with_calibre.
+            # It will call get_calibre_ebook_convert_path again, but it will find it in the DB or PATH now.
             html_file_path, opf_file_path, cover_image_path = convert_ebook_with_calibre(
                 input_ebook_path,
                 temp_html_output_dir,
-                ui_callback_for_path_selection=ask_user_for_calibre_path_gui
+                ui_callback_for_path_selection=None # Path is already found and saved.
             )
             wx.EndBusyCursor()
 
             if not html_file_path:
                 wx.MessageBox(f"Failed to convert '{Path(input_ebook_path).name}' using Calibre. Check console for errors.",
                               "Calibre Conversion Failed", wx.OK | wx.ICON_ERROR)
-                # Clean up temp dir even on failure here
-                if Path(temp_html_output_dir).exists():
-                    try: shutil.rmtree(temp_html_output_dir)
-                    except Exception as e: print(f"Error cleaning temp dir on fail: {e}")
                 return
 
-            # 3. If conversion is successful, call core.extract_chapters_and_metadata_from_calibre_html
             wx.BeginBusyCursor()
-            # This function now returns (list_of_chapters, dict_of_metadata)
             extracted_chapters, book_metadata = extract_chapters_and_metadata_from_calibre_html(html_file_path, opf_file_path)
             wx.EndBusyCursor()
 
             if not extracted_chapters:
-                # Metadata might still be partially useful or could indicate OPF parsing success
                 title_from_meta = book_metadata.get('title', Path(input_ebook_path).stem)
                 wx.MessageBox(f"Could not extract chapters from the HTML output of '{title_from_meta}'. The book might be empty or in an unexpected format.",
                               "Chapter Extraction Failed", wx.OK | wx.ICON_WARNING)
-                # Don't return yet, cleanup needs to happen in finally.
 
-            # 4. Adapt UI population logic
+            # ... (rest of the UI update logic is the same)
             # Cleanup previous dynamic UI parts
             if hasattr(self, 'splitter_left') and self.splitter_left: self.splitter_left.Destroy()
             if hasattr(self, 'splitter_right') and self.splitter_right: self.splitter_right.Destroy()
             self.splitter_left, self.splitter_right = None, None
 
-            self.selected_file_path = input_ebook_path # Store original ebook path for reference
-            # Store the path to the cover image if found, for later use by core.main
-            self.book_data = { # Initialize book_data for Calibre imports
+            self.selected_file_path = input_ebook_path
+            self.book_data = {
                 'cover_image_path': cover_image_path,
-                'metadata': book_metadata # Store all parsed metadata
+                'metadata': book_metadata
             }
 
             self.selected_book_title = book_metadata.get('title', Path(input_ebook_path).stem)
             self.selected_book_author = book_metadata.get('creator', "Unknown Author")
-            # We don't have an ebooklib 'book' object for Calibre HTML imports
             self.selected_book = None
 
-            self.document_chapters = extracted_chapters # These are SimpleNamespace objects
-            self.good_chapters_list = list(self.document_chapters) # Assume all extracted are "good" initially
+            self.document_chapters = extracted_chapters
+            self.good_chapters_list = list(self.document_chapters)
 
             if self.document_chapters:
                 self.selected_chapter = self.document_chapters[0]
             else:
-                self.selected_chapter = None # No chapters extracted
-
-            # Ensure chapter objects have `is_selected` and `short_name` (done by core function)
+                self.selected_chapter = None
 
             self.create_notebook_and_tabs()
-            self.create_layout_for_ebook(self.splitter) # Populates UI, including book details panel
+            self.create_layout_for_ebook(self.splitter)
 
-            # Update Cover display
             if hasattr(self, 'cover_bitmap'):
                 if cover_image_path and Path(cover_image_path).exists():
                     try:
-                        # Read the image file, create PIL Image, then wx.Image
                         pil_image = Image.open(cover_image_path)
                         wx_img = wx.Image(pil_image.size[0], pil_image.size[1])
-                        # Convert PIL to RGB if it has alpha, for SetData
                         if pil_image.mode == 'RGBA':
                             pil_image_rgb = pil_image.convert('RGB')
                             wx_img.SetData(pil_image_rgb.tobytes())
-                            # If you need alpha, handle it with SetAlphaData or by creating wx.Bitmap directly
                         else:
                              wx_img.SetData(pil_image.convert("RGB").tobytes())
 
-                        # Rescale for display
-                        cover_h = 200 # Target height
+                        cover_h = 200
                         cover_w = int(cover_h * pil_image.size[0] / pil_image.size[1])
-                        if cover_w > 0 and cover_h > 0 : #Ensure valid dimensions
+                        if cover_w > 0 and cover_h > 0 :
                             wx_img = wx_img.Scale(cover_w, cover_h, wx.IMAGE_QUALITY_HIGH)
 
                         self.cover_bitmap.SetBitmap(wx_img.ConvertToBitmap())
-                        self.cover_bitmap.SetMaxSize((200, cover_h)) # Max size for layout
-                        self.book_info_panel.Layout() # Relayout parent panel
+                        self.cover_bitmap.SetMaxSize((200, cover_h))
+                        self.book_info_panel.Layout()
                     except Exception as e_cover:
                         print(f"Error loading or displaying cover image '{cover_image_path}': {e_cover}")
-                        self.cover_bitmap.SetBitmap(wx.NullBitmap) # Clear on error
+                        self.cover_bitmap.SetBitmap(wx.NullBitmap)
                 else:
-                    self.cover_bitmap.SetBitmap(wx.NullBitmap) # No cover found or path invalid
+                    self.cover_bitmap.SetBitmap(wx.NullBitmap)
 
             self.refresh_staging_tab()
             self.refresh_queue_tab()
@@ -1896,17 +1882,15 @@ class MainWindow(wx.Frame):
             if extracted_chapters:
                 wx.MessageBox(f"Successfully processed '{self.selected_book_title}' using Calibre.",
                               "Processing Complete", wx.OK | wx.ICON_INFORMATION)
-            # else: Message about no chapters already shown
 
         finally:
-            # 5. Clean up the temporary HTML output directory (includes HTML, OPF, cover)
             if Path(temp_html_output_dir).exists():
                 try:
                     shutil.rmtree(temp_html_output_dir)
                     print(f"Cleaned up temporary directory: {temp_html_output_dir}")
                 except Exception as e:
                     print(f"Error cleaning up temporary directory {temp_html_output_dir}: {e}")
-            if wx.IsBusy(): # Ensure cursor is reset if an error occurred mid-process
+            if wx.IsBusy():
                 wx.EndBusyCursor()
 
 
