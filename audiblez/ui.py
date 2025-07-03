@@ -217,6 +217,11 @@ class MainWindow(wx.Frame):
         self.synth_panel.Layout()
 
     def on_core_finished(self, event):
+        # Ensure progress bar shows 100% on completion
+        self.progress_bar.SetValue(100)
+        self.progress_bar_label.SetLabel("Synthesis Progress: 100%")
+        self.synth_panel.Layout() # Refresh layout to show update immediately
+
         self.synthesis_in_progress = False # This is for single book synthesis
         # For queue, self.queue_processing_active is used.
 

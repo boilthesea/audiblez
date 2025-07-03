@@ -307,7 +307,11 @@ def gen_audio_segments(pipeline, text, voice, speed, stats=None, max_sentences=N
             audio_segments.append(audio)
         if stats:
             stats.processed_chars += len(sent.text)
-            stats.progress = stats.processed_chars * 100 // stats.total_chars
+            # Use floating point division for more accurate progress percentage
+            if stats.total_chars > 0:
+                stats.progress = int((stats.processed_chars / stats.total_chars) * 100)
+            else:
+                stats.progress = 100
             stats.eta = strfdelta((stats.total_chars - stats.processed_chars) / stats.chars_per_sec)
             if post_event: post_event('CORE_PROGRESS', stats=stats)
             print(f'Estimated time remaining: {stats.eta}')
