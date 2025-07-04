@@ -60,6 +60,12 @@ class MainWindow(wx.Frame):
         if not self.user_settings: # Ensure it's a dict
             self.user_settings = {}
 
+        # Dark mode preference
+        self.is_dark_mode = bool(self.user_settings.get('dark_mode', 0)) # Default to False (light mode)
+        if hasattr(self, 'dark_mode_checkbox'): # Checkbox might not exist if this is called before create_layout
+            self.dark_mode_checkbox.SetValue(self.is_dark_mode)
+
+
         # Initialize core attributes that will be set by UI controls,
         # potentially using loaded settings or defaults.
         # These will be properly set in create_params_panel and create_synthesis_panel
@@ -92,9 +98,16 @@ class MainWindow(wx.Frame):
         # Bind close event to stop timer
         self.Bind(wx.EVT_CLOSE, self.on_close_window)
 
+        # Update checkbox state after all UI elements are created
+        if hasattr(self, 'dark_mode_checkbox'):
+            self.dark_mode_checkbox.SetValue(self.is_dark_mode)
+
         default_epub_path = Path('../epub/lewis.epub')
         if default_epub_path.exists():
             wx.CallAfter(self.open_epub, str(default_epub_path))
+
+        # Apply initial theme
+        wx.CallAfter(self.apply_theme)
 
 
     def on_close_window(self, event):
@@ -189,6 +202,230 @@ class MainWindow(wx.Frame):
 
         menubar.Append(file_menu, "&File")
         self.SetMenuBar(menubar)
+
+    def on_toggle_dark_mode(self, event):
+        self.is_dark_mode = self.dark_mode_checkbox.IsChecked()
+        db.save_user_setting('dark_mode', 1 if self.is_dark_mode else 0)
+        self.apply_theme()
+
+    def _style_widget_and_children(self, widget, bg_color, fg_color, is_input=False, is_button=False, btn_text_color=None):
+        if widget is None:
+            return
+
+        # Specific handling for known widget types
+        if isinstance(widget, (wx.Panel, wx.ScrolledPanel, wx.Dialog, wx.Frame, wx.TopLevelWindow)):
+            widget.SetBackgroundColour(bg_color)
+            widget.SetForegroundColour(fg_color) # Usually for text on the panel itself, if any
+        elif isinstance(widget, (wx.StaticText, wx.CheckBox, wx.RadioButton)):
+            # For StaticText, CheckBox, RadioButton, background should often be parent's background
+            # but foreground is their text color.
+            # Get the effective background color from parent if possible
+            parent_bg = bg_color
+            parent = widget.GetParent()
+            if parent:
+                parent_bg = parent.GetBackgroundColour()
+
+            widget.SetBackgroundColour(parent_bg)
+            widget.SetForegroundColour(fg_color)
+        elif isinstance(widget, wx.TextCtrl):
+            if is_input:
+                widget.SetBackgroundColour(self.colors['input_bg'])
+                widget.SetForegroundColour(self.colors['input_fg'])
+            else:
+                widget.SetBackgroundColour(bg_color) # Or a specific text area bg
+                widget.SetForegroundColour(fg_color)
+        elif isinstance(widget, wx.Button):
+            if is_button:
+                widget.SetBackgroundColour(self.colors['accent_primary'])
+                widget.SetForegroundColour(btn_text_color if btn_text_color else self.colors['button_text'])
+            else: # Should not happen if called correctly
+                widget.SetBackgroundColour(bg_color)
+                widget.SetForegroundColour(fg_color)
+        elif isinstance(widget, wx.ComboBox):
+            # ComboBox styling can be tricky and platform-dependent
+            widget.SetBackgroundColour(self.colors['input_bg'] if is_input else bg_color)
+            widget.SetForegroundColour(self.colors['input_fg'] if is_input else fg_color)
+        elif isinstance(widget, wx.ListCtrl):
+            widget.SetBackgroundColour(self.colors['input_bg'] if is_input else bg_color) # List background
+            widget.SetTextColour(self.colors['input_fg'] if is_input else fg_color) # Text of items
+        elif isinstance(widget, wx.Gauge):
+            widget.SetBackgroundColour(bg_color) # Background of the gauge area
+            widget.SetForegroundColour(self.colors['accent_primary']) # Color of the bar
+        # Add other specific widget types here if needed, e.g., wx.Notebook
+
+        # Recursively style children
+        if hasattr(widget, 'GetChildren'):
+            for child in widget.GetChildren():
+                # Determine if child is an input or button for specific styling
+                # This is a simplification; more robust type checking or flags might be needed
+                child_is_input = isinstance(child, (wx.TextCtrl, wx.ComboBox))
+                child_is_button = isinstance(child, wx.Button)
+                self._style_widget_and_children(child, bg_color, fg_color, child_is_input, child_is_button, btn_text_color)
+        widget.Refresh()
+
+
+    def apply_theme(self):
+        if not hasattr(self, 'dark_mode_checkbox'): # UI not fully initialized
+            return
+
+        is_dark = self.is_dark_mode
+
+        # Define color palettes
+        if is_dark:
+            self.colors = {
+                'bg': wx.Colour("#1E1E1E"),
+                'fg': wx.Colour("#E0E0E0"),
+                'accent_primary': wx.Colour("#7F5AF0"),
+                'accent_secondary': wx.Colour("#2CB67D"),
+                'button_text': wx.Colour("#FFFFFF"),
+                'panel_bg': wx.Colour("#2A2A2A"),
+                'input_bg': wx.Colour("#3C3C3C"),
+                'input_fg': wx.Colour("#E0E0E0"),
+                'list_header_bg': wx.Colour("#2A2A2A"), # Darker for headers
+                'list_header_fg': wx.Colour("#E0E0E0"),
+            }
+        else: # Light Mode
+            self.colors = {
+                'bg': wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOW),
+                'fg': wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOWTEXT),
+                'accent_primary': wx.SystemSettings.GetColour(wx.SYS_COLOUR_HIGHLIGHT),
+                'accent_secondary': wx.SystemSettings.GetColour(wx.SYS_COLOUR_BTNSHADOW), # Example
+                'button_text': wx.SystemSettings.GetColour(wx.SYS_COLOUR_BTNTEXT),
+                'panel_bg': wx.SystemSettings.GetColour(wx.SYS_COLOUR_3DFACE), # Standard panel bg
+                'input_bg': wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOW),
+                'input_fg': wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOWTEXT),
+                'list_header_bg': wx.SystemSettings.GetColour(wx.SYS_COLOUR_3DFACE),
+                'list_header_fg': wx.SystemSettings.GetColour(wx.SYS_COLOUR_BTNTEXT),
+            }
+
+        # Apply to main frame and top-level panels/sizers
+        self.SetBackgroundColour(self.colors['bg'])
+        self.SetForegroundColour(self.colors['fg']) # Default text for the frame itself
+
+        # Style top_panel and its direct children (buttons, checkbox)
+        if hasattr(self, 'top_panel'):
+            self.top_panel.SetBackgroundColour(self.colors['panel_bg'])
+            for child in self.top_panel.GetChildren():
+                if isinstance(child, wx.Button):
+                    child.SetBackgroundColour(self.colors['accent_primary'])
+                    child.SetForegroundColour(self.colors['button_text'])
+                elif isinstance(child, wx.CheckBox): # Dark mode checkbox itself
+                    child.SetBackgroundColour(self.colors['panel_bg']) # Match panel
+                    child.SetForegroundColour(self.colors['fg'])
+                else:
+                    if hasattr(child, 'SetBackgroundColour'): child.SetBackgroundColour(self.colors['panel_bg'])
+                    if hasattr(child, 'SetForegroundColour'): child.SetForegroundColour(self.colors['fg'])
+                child.Refresh()
+
+        # Style main splitter and its children (splitter_left, splitter_right)
+        if hasattr(self, 'splitter'):
+            self.splitter.SetBackgroundColour(self.colors['bg'])
+            # self.splitter.SetForegroundColour(self.colors['fg']) # Not usually text directly on splitter
+
+        if hasattr(self, 'splitter_left') and self.splitter_left:
+            self.splitter_left.SetBackgroundColour(self.colors['panel_bg'])
+            # self.splitter_left.SetForegroundColour(self.colors['fg'])
+            if hasattr(self.splitter_left, 'GetChildren'):
+                 for child in self.splitter_left.GetChildren(): # e.g., self.notebook
+                    self._style_widget_and_children(child, self.colors['panel_bg'], self.colors['fg'], btn_text_color=self.colors['button_text'])
+
+
+        if hasattr(self, 'splitter_right') and self.splitter_right:
+            self.splitter_right.SetBackgroundColour(self.colors['panel_bg'])
+            # self.splitter_right.SetForegroundColour(self.colors['fg'])
+            if hasattr(self.splitter_right, 'GetChildren'):
+                for child in self.splitter_right.GetChildren(): # e.g., center_panel, right_panel
+                    self._style_widget_and_children(child, self.colors['panel_bg'], self.colors['fg'], btn_text_color=self.colors['button_text'])
+
+
+        # Specific handling for Notebook and its pages
+        if hasattr(self, 'notebook') and self.notebook:
+            self.notebook.SetBackgroundColour(self.colors['panel_bg'])
+            self.notebook.SetForegroundColour(self.colors['fg']) # For tab text
+            for i in range(self.notebook.GetPageCount()):
+                page = self.notebook.GetPage(i)
+                if page:
+                    self._style_widget_and_children(page, self.colors['panel_bg'], self.colors['fg'], btn_text_color=self.colors['button_text'])
+
+
+        # Style dynamically created panels if they exist
+        # Chapters Panel (inside chapters_tab_page)
+        if hasattr(self, 'chapters_tab_page') and self.chapters_tab_page:
+             self._style_widget_and_children(self.chapters_tab_page, self.colors['panel_bg'], self.colors['fg'], btn_text_color=self.colors['button_text'])
+        if hasattr(self, 'chapters_panel') and self.chapters_panel: # This is the ScrolledPanel
+            self._style_widget_and_children(self.chapters_panel, self.colors['panel_bg'], self.colors['fg'], btn_text_color=self.colors['button_text'])
+            if hasattr(self, 'table') and self.table: # The ListCtrl
+                self.table.SetBackgroundColour(self.colors['input_bg'])
+                self.table.SetTextColour(self.colors['input_fg'])
+                # Header styling for ListCtrl is notoriously difficult and platform-dependent.
+                # wxPython doesn't offer direct, cross-platform ways to style ListCtrl headers.
+
+        # Staging Tab Panel
+        if hasattr(self, 'staging_tab_panel') and self.staging_tab_panel:
+            self._style_widget_and_children(self.staging_tab_panel, self.colors['panel_bg'], self.colors['fg'], btn_text_color=self.colors['button_text'])
+            # Children of staging_tab_panel (StaticBoxes, ListCtrls) are styled by _style_widget_and_children
+
+        # Queue Tab Panel
+        if hasattr(self, 'queue_tab_panel') and self.queue_tab_panel:
+            self._style_widget_and_children(self.queue_tab_panel, self.colors['panel_bg'], self.colors['fg'], btn_text_color=self.colors['button_text'])
+            # Children of queue_tab_panel (StaticBoxes, Buttons) are styled by _style_widget_and_children
+
+
+        # Right Panel contents (Book Info, Params, Synth)
+        if hasattr(self, 'book_info_panel_box') and self.book_info_panel_box: # This is a Panel containing StaticBoxSizer
+             self.book_info_panel_box.SetBackgroundColour(self.colors['panel_bg'])
+             sbs = self.book_info_panel_box.GetSizer()
+             if isinstance(sbs, wx.StaticBoxSizer):
+                 sb = sbs.GetStaticBox()
+                 sb.SetBackgroundColour(self.colors['panel_bg'])
+                 sb.SetForegroundColour(self.colors['fg'])
+             self._style_widget_and_children(self.book_info_panel_box, self.colors['panel_bg'], self.colors['fg'], btn_text_color=self.colors['button_text'])
+
+
+        if hasattr(self, 'params_panel') and self.params_panel: # This is the inner panel
+            panel_box_container = self.params_panel.GetParent() # The panel with StaticBoxSizer
+            panel_box_container.SetBackgroundColour(self.colors['panel_bg'])
+            sbs = panel_box_container.GetSizer()
+            if isinstance(sbs, wx.StaticBoxSizer):
+                sb = sbs.GetStaticBox()
+                sb.SetBackgroundColour(self.colors['panel_bg'])
+                sb.SetForegroundColour(self.colors['fg'])
+            self._style_widget_and_children(panel_box_container, self.colors['panel_bg'], self.colors['fg'], btn_text_color=self.colors['button_text'])
+
+
+        if hasattr(self, 'synth_panel') and self.synth_panel: # This is the inner panel
+            panel_box_container = self.synth_panel.GetParent() # The panel with StaticBoxSizer
+            panel_box_container.SetBackgroundColour(self.colors['panel_bg'])
+            sbs = panel_box_container.GetSizer()
+            if isinstance(sbs, wx.StaticBoxSizer):
+                sb = sbs.GetStaticBox()
+                sb.SetBackgroundColour(self.colors['panel_bg'])
+                sb.SetForegroundColour(self.colors['fg'])
+            self._style_widget_and_children(panel_box_container, self.colors['panel_bg'], self.colors['fg'], btn_text_color=self.colors['button_text'])
+
+        # Center Panel (text_area, chapter_label, preview_button)
+        if hasattr(self, 'center_panel') and self.center_panel:
+            self.center_panel.SetBackgroundColour(self.colors['panel_bg'])
+            # self.center_panel.SetForegroundColour(self.colors['fg']) # For text directly on it
+            if hasattr(self, 'chapter_label'):
+                self.chapter_label.SetBackgroundColour(self.colors['panel_bg'])
+                self.chapter_label.SetForegroundColour(self.colors['fg'])
+            if hasattr(self, 'text_area'):
+                self.text_area.SetBackgroundColour(self.colors['input_bg'])
+                self.text_area.SetForegroundColour(self.colors['input_fg'])
+            # Preview button is handled by the recursive call if center_panel is passed to _style_widget_and_children,
+            # or style it explicitly:
+            # preview_button = ... find it ...
+            # preview_button.SetBackgroundColour(self.colors['accent_primary'])
+            # preview_button.SetForegroundColour(self.colors['button_text'])
+            # For now, rely on recursive styling from splitter_right's children:
+            self._style_widget_and_children(self.center_panel, self.colors['panel_bg'], self.colors['fg'], btn_text_color=self.colors['button_text'])
+
+
+        # Refresh the whole layout
+        self.Layout()
+        self.Refresh()
+
 
     def on_core_started(self, event):
         print('CORE_STARTED')
@@ -319,6 +556,11 @@ class MainWindow(wx.Frame):
         help_button = wx.Button(top_panel, label="ℹ️ About")
         help_button.Bind(wx.EVT_BUTTON, lambda event: self.about_dialog())
         top_sizer.Add(help_button, 0, wx.ALL, 5)
+
+        # Dark Mode Checkbox
+        self.dark_mode_checkbox = wx.CheckBox(top_panel, label="🌙 Dark Mode")
+        self.dark_mode_checkbox.Bind(wx.EVT_CHECKBOX, self.on_toggle_dark_mode)
+        top_sizer.Add(self.dark_mode_checkbox, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
 
         self.main_sizer = wx.BoxSizer(wx.VERTICAL)
         self.SetSizer(self.main_sizer)
@@ -777,6 +1019,7 @@ class MainWindow(wx.Frame):
 
         self.splitter.Layout() # Layout the main splitter panel
         self.Layout() # Layout the main frame
+        self.apply_theme() # Apply theme after opening/refreshing epub related layout
 
     def refresh_queue_tab(self):
         # Clear existing content from the queue_tab_panel's sizer
@@ -903,6 +1146,7 @@ class MainWindow(wx.Frame):
         if hasattr(self, 'splitter_left') and self.splitter_left:
             self.splitter_left.Layout()
         # self.Layout() # Optionally, layout the whole frame if needed
+        self.apply_theme() # Apply theme after refreshing queue tab
 
     def update_scheduled_time_display(self):
         if not hasattr(self, 'scheduled_time_text') or not self.scheduled_time_text:
@@ -1585,6 +1829,7 @@ class MainWindow(wx.Frame):
         # self.Layout() # Main frame layout, might be too broad, staging_tab_panel.Layout() should suffice.
         self.splitter.Layout() # Layout the main splitter that contains left and right
         self.Layout() # Full frame layout might be needed if sizers changed overall frame size.
+        self.apply_theme() # Apply theme after refreshing staging tab
 
     def update_staging_tab_for_processed_chapters(self, processed_staged_chapter_ids: list[int]):
         """
