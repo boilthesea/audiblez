@@ -213,7 +213,8 @@ class MainWindow(wx.Frame):
             return
 
         # Specific handling for known widget types
-        if isinstance(widget, (wx.Panel, wx.ScrolledPanel, wx.Dialog, wx.Frame, wx.TopLevelWindow)):
+        # Note: ScrolledPanel is imported from wx.lib.scrolledpanel
+        if isinstance(widget, (wx.Panel, ScrolledPanel, wx.Dialog, wx.Frame, wx.TopLevelWindow)):
             widget.SetBackgroundColour(bg_color)
             widget.SetForegroundColour(fg_color) # Usually for text on the panel itself, if any
         elif isinstance(widget, (wx.StaticText, wx.CheckBox, wx.RadioButton)):
