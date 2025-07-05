@@ -11,15 +11,19 @@ import subprocess
 import io
 import os
 import wx
-import wx.adv # For DatePickerCtrl, TimePickerCtrl
-from datetime import datetime, time as dt_time # For schedule dialog
+import wx.adv  # For DatePickerCtrl, TimePickerCtrl
+from wx.lib.agw import flatnotebook as fnb
+from wx.lib.agw.ultimatelistctrl import UltimateListCtrl, ULC_REPORT, ULC_SINGLE_SEL
+from wx.lib.checkbox import GenCheckBox
+
+from datetime import datetime, time as dt_time  # For schedule dialog
 from wx.lib.newevent import NewEvent
 from wx.lib.scrolledpanel import ScrolledPanel
 from PIL import Image
 from tempfile import NamedTemporaryFile
 from pathlib import Path
-import audiblez.database as db # Changed import for clarity
-import json # For settings
+import audiblez.database as db  # Changed import for clarity
+import json  # For settings
 
 from audiblez.voices import voices, flags
 # from audiblez.database import load_all_user_settings, save_user_setting # Now use db. prefix
@@ -33,6 +37,83 @@ EVENTS = {
 }
 
 border = 5
+
+
+class CustomGauge(wx.Panel):
+    def __init__(self, parent, range_val=100, *args, **kwargs):
+        super().__init__(parent, *args, **kwargs)
+        self.range = range_val
+        self.value = 0
+        self.SetBackgroundStyle(wx.BG_STYLE_PAINT)
+        self.Bind(wx.EVT_PAINT, self.on_paint)
+
+    def SetValue(self, value):
+        self.value = max(0, min(self.range, value))
+        self.Refresh()
+
+    def GetValue(self):
+        return self.value
+
+    def SetRange(self, range_val):
+        self.range = range_val
+        self.Refresh()
+
+    def on_paint(self, event):
+        dc = wx.PaintDC(self)
+        width, height = self.GetSize()
+
+        # These colors will be replaced by theme colors in Phase 2
+        background_color = wx.SystemSettings.GetColour(wx.SYS_COLOUR_BTNFACE)
+        fill_color = wx.SystemSettings.GetColour(wx.SYS_COLOUR_HIGHLIGHT)
+        border_color = wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOWFRAME)
+
+        dc.SetBrush(wx.Brush(background_color))
+        dc.SetPen(wx.Pen(border_color))
+        dc.DrawRectangle(0, 0, width, height)
+
+        if self.range > 0 and self.value > 0:
+            progress_width = int((self.value / self.range) * width)
+            dc.SetBrush(wx.Brush(fill_color))
+            dc.SetPen(wx.TRANSPARENT_PEN)
+            dc.DrawRectangle(0, 0, progress_width, height)
+
+
+class ListBoxComboPopup(wx.ComboPopup):
+    def __init__(self, choices=None):
+        wx.ComboPopup.__init__(self)
+        self.choices = choices if choices is not None else []
+        self.listbox = None
+
+    def Create(self, parent):
+        self.listbox = wx.ListBox(parent, choices=self.choices)
+        self.listbox.Bind(wx.EVT_LISTBOX, self.on_listbox_select)
+        return True
+
+    def GetControl(self):
+        return self.listbox
+
+    def GetStringValue(self):
+        if self.listbox.GetSelection() != wx.NOT_FOUND:
+            return self.listbox.GetStringSelection()
+        return self.GetComboCtrl().GetValue()
+
+    def on_listbox_select(self, event):
+        # This event is needed to select the item and dismiss the popup
+        combo = self.GetComboCtrl()
+        value = event.GetString()
+        combo.SetValue(value)
+        self.Dismiss()
+        # Manually fire the event to ensure the handler is called
+        text_event = wx.CommandEvent(wx.wxEVT_COMMAND_TEXT_UPDATED, combo.GetId())
+        text_event.SetString(value)
+        wx.PostEvent(combo, text_event)
+
+    # The following methods are required by the interface
+    def OnPopup(self):
+        super().OnPopup()
+
+    def OnDismiss(self):
+        super().OnDismiss()
 
 
 class MainWindow(wx.Frame):
@@ -134,7 +215,7 @@ class MainWindow(wx.Frame):
             # Add splitter_left to the main splitter_sizer
             self.splitter_sizer.Add(self.splitter_left, 1, wx.ALL | wx.EXPAND, 5)
 
-        self.notebook = wx.Notebook(self.splitter_left)
+        self.notebook = fnb.FlatNotebook(self.splitter_left)
 
         # Chapters Tab
         self.chapters_tab_page = wx.Panel(self.notebook)
@@ -403,15 +484,22 @@ class MainWindow(wx.Frame):
         self.right_sizer = wx.BoxSizer(wx.VERTICAL)
         self.right_panel.SetSizer(self.right_sizer)
 
-        self.book_info_panel_box = wx.Panel(self.right_panel, style=wx.SUNKEN_BORDER)
-        book_info_panel_box_sizer = wx.StaticBoxSizer(wx.VERTICAL, self.book_info_panel_box, "Book Details")
-        self.book_info_panel_box.SetSizer(book_info_panel_box_sizer)
-        self.right_sizer.Add(self.book_info_panel_box, 1, wx.ALL | wx.EXPAND, 5)
+        # --- Replacement for StaticBoxSizer ---
+        book_details_container = wx.Panel(self.right_panel, style=wx.BORDER_THEME)
+        container_sizer = wx.BoxSizer(wx.VERTICAL)
+        book_details_container.SetSizer(container_sizer)
 
-        self.book_info_panel = wx.Panel(self.book_info_panel_box, style=wx.BORDER_NONE)
+        label = wx.StaticText(book_details_container, label="Book Details")
+        font = label.GetFont()
+        font.SetWeight(wx.FONTWEIGHT_BOLD)
+        label.SetFont(font)
+        container_sizer.Add(label, 0, wx.ALL & ~wx.BOTTOM, 5)
+
+        self.book_info_panel = wx.Panel(book_details_container, style=wx.BORDER_NONE)
         self.book_info_sizer = wx.BoxSizer(wx.HORIZONTAL)
         self.book_info_panel.SetSizer(self.book_info_sizer)
-        book_info_panel_box_sizer.Add(self.book_info_panel, 1, wx.ALL | wx.EXPAND, 5)
+        container_sizer.Add(self.book_info_panel, 1, wx.ALL | wx.EXPAND, 5)
+        self.right_sizer.Add(book_details_container, 1, wx.ALL | wx.EXPAND, 5)
 
         # Add cover image
         self.cover_bitmap = wx.StaticBitmap(self.book_info_panel, -1)
@@ -455,53 +543,61 @@ class MainWindow(wx.Frame):
         book_details_sizer.Add(length_text, pos=(2, 1), flag=wx.ALL, border=5)
 
     def create_params_panel(self):
-        panel_box = wx.Panel(self.right_panel, style=wx.SUNKEN_BORDER)
-        panel_box_sizer = wx.StaticBoxSizer(wx.VERTICAL, panel_box, "Audiobook Parameters")
-        panel_box.SetSizer(panel_box_sizer)
+        # --- Replacement for StaticBoxSizer ---
+        panel_container = wx.Panel(self.right_panel, style=wx.BORDER_THEME)
+        container_sizer = wx.BoxSizer(wx.VERTICAL)
+        panel_container.SetSizer(container_sizer)
 
-        panel = self.params_panel = wx.Panel(panel_box)
-        panel_box_sizer.Add(panel, 1, wx.ALL | wx.EXPAND, 5)
-        self.right_sizer.Add(panel_box, 1, wx.ALL | wx.EXPAND, 5)
+        label = wx.StaticText(panel_container, label="Audiobook Parameters")
+        font = label.GetFont()
+        font.SetWeight(wx.FONTWEIGHT_BOLD)
+        label.SetFont(font)
+        container_sizer.Add(label, 0, wx.ALL & ~wx.BOTTOM, 5)
+
+        panel = self.params_panel = wx.Panel(panel_container)
+        container_sizer.Add(panel, 1, wx.ALL | wx.EXPAND, 5)
+        self.right_sizer.Add(panel_container, 1, wx.ALL | wx.EXPAND, 5)
         sizer = wx.GridBagSizer(10, 10)
         panel.SetSizer(sizer)
 
         engine_label = wx.StaticText(panel, label="Engine:")
-        engine_radio_panel = wx.Panel(panel)
-        self.cpu_radio = wx.RadioButton(engine_radio_panel, label="CPU", style=wx.RB_GROUP)
-        self.cuda_radio = wx.RadioButton(engine_radio_panel, label="CUDA")
+        engine_toggle_panel = wx.Panel(panel)
+        self.cpu_toggle = wx.ToggleButton(engine_toggle_panel, label="CPU")
+        self.cuda_toggle = wx.ToggleButton(engine_toggle_panel, label="CUDA")
+        self.engine_toggles = [self.cpu_toggle, self.cuda_toggle]
+
+        def on_select_engine(engine_type):
+            torch.set_default_device(engine_type)
+            db.save_user_setting('engine', engine_type)  # Use db prefix
+            print(f"Engine set to {engine_type} and saved.")
+
+        def on_engine_toggle(event):
+            toggled_button = event.GetEventObject()
+            toggled_button.SetValue(True)  # Keep it pressed
+            for toggle in self.engine_toggles:
+                if toggle != toggled_button:
+                    toggle.SetValue(False)
+            engine_type = 'cuda' if toggled_button == self.cuda_toggle else 'cpu'
+            on_select_engine(engine_type)
+
+        self.cpu_toggle.Bind(wx.EVT_TOGGLEBUTTON, on_engine_toggle)
+        self.cuda_toggle.Bind(wx.EVT_TOGGLEBUTTON, on_engine_toggle)
 
         # Load saved engine or set default
         saved_engine = self.user_settings.get('engine')
-        if saved_engine == 'cpu':
-            self.cpu_radio.SetValue(True)
-            torch.set_default_device('cpu')
-        elif saved_engine == 'cuda' and torch.cuda.is_available():
-            self.cuda_radio.SetValue(True)
+        if saved_engine == 'cuda' and torch.cuda.is_available():
+            self.cuda_toggle.SetValue(True)
             torch.set_default_device('cuda')
-        elif torch.cuda.is_available(): # Default to CUDA if available and no setting
-            self.cuda_radio.SetValue(True)
-            torch.set_default_device('cuda')
-        else: # Default to CPU
-            self.cpu_radio.SetValue(True)
+        else:
+            self.cpu_toggle.SetValue(True)
             torch.set_default_device('cpu')
-
-        # if not torch.cuda.is_available():
-            # self.cuda_radio.Disable() # Optional: disable if no CUDA
 
         sizer.Add(engine_label, pos=(0, 0), flag=wx.ALL, border=border)
-        sizer.Add(engine_radio_panel, pos=(0, 1), flag=wx.ALL, border=border)
-        engine_radio_panel_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        engine_radio_panel.SetSizer(engine_radio_panel_sizer)
-        engine_radio_panel_sizer.Add(self.cpu_radio, 0, wx.ALL, 5)
-        engine_radio_panel_sizer.Add(self.cuda_radio, 0, wx.ALL, 5)
-
-        def on_select_engine(event, engine_type):
-            torch.set_default_device(engine_type)
-            db.save_user_setting('engine', engine_type) # Use db prefix
-            print(f"Engine set to {engine_type} and saved.")
-
-        self.cpu_radio.Bind(wx.EVT_RADIOBUTTON, lambda event: on_select_engine(event, 'cpu'))
-        self.cuda_radio.Bind(wx.EVT_RADIOBUTTON, lambda event: on_select_engine(event, 'cuda'))
+        sizer.Add(engine_toggle_panel, pos=(0, 1), flag=wx.ALL, border=border)
+        engine_toggle_panel_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        engine_toggle_panel.SetSizer(engine_toggle_panel_sizer)
+        engine_toggle_panel_sizer.Add(self.cpu_toggle, 0, wx.ALL, 5)
+        engine_toggle_panel_sizer.Add(self.cuda_toggle, 0, wx.ALL, 5)
 
         # Create a list of voices with flags
         flag_and_voice_list = []
@@ -517,8 +613,11 @@ class MainWindow(wx.Frame):
         else:
             self.selected_voice = flag_and_voice_list[0] if flag_and_voice_list else ""
 
-        self.voice_dropdown = wx.ComboBox(panel, choices=flag_and_voice_list, value=self.selected_voice)
-        self.voice_dropdown.Bind(wx.EVT_COMBOBOX, self.on_select_voice)
+        self.voice_dropdown = wx.ComboCtrl(panel, style=wx.CB_READONLY)
+        popup_ctrl = ListBoxComboPopup(flag_and_voice_list)
+        self.voice_dropdown.SetPopupControl(popup_ctrl)
+        self.voice_dropdown.SetValue(self.selected_voice)
+        self.voice_dropdown.Bind(wx.EVT_TEXT, self.on_select_voice)
         sizer.Add(voice_label, pos=(1, 0), flag=wx.ALL, border=border)
         sizer.Add(self.voice_dropdown, pos=(1, 1), flag=wx.ALL, border=border)
 
@@ -555,45 +654,63 @@ class MainWindow(wx.Frame):
         m4b_assembly_sizer = wx.BoxSizer(wx.HORIZONTAL)
         m4b_assembly_panel.SetSizer(m4b_assembly_sizer)
 
-        self.m4b_assembly_original_radio = wx.RadioButton(m4b_assembly_panel, label="Original", style=wx.RB_GROUP)
-        self.m4b_assembly_crispy_radio = wx.RadioButton(m4b_assembly_panel, label="Extra Crispy")
+        self.m4b_assembly_original_toggle = wx.ToggleButton(m4b_assembly_panel, label="Original")
+        self.m4b_assembly_crispy_toggle = wx.ToggleButton(m4b_assembly_panel, label="Extra Crispy")
+        self.m4b_toggles = [self.m4b_assembly_original_toggle, self.m4b_assembly_crispy_toggle]
 
         help_icon = wx.StaticText(m4b_assembly_panel, label="❓")
-        help_icon.SetToolTip("Original method is time-tested. 'Extra Crispy' is best used when experiencing failures to produce an m4b under the original method, especially in Windows.")
+        help_icon.SetToolTip(
+            "Original method is time-tested. 'Extra Crispy' is best used when experiencing failures to produce an m4b under the original method, especially in Windows.")
 
-        m4b_assembly_sizer.Add(self.m4b_assembly_original_radio, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 5)
-        m4b_assembly_sizer.Add(self.m4b_assembly_crispy_radio, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 5)
+        m4b_assembly_sizer.Add(self.m4b_assembly_original_toggle, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 5)
+        m4b_assembly_sizer.Add(self.m4b_assembly_crispy_toggle, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 5)
         m4b_assembly_sizer.Add(help_icon, 0, wx.ALIGN_CENTER_VERTICAL)
 
-        # Load saved setting or set default
-        saved_m4b_method = self.user_settings.get('m4b_assembly_method', 'original')
-        if saved_m4b_method == 'crispy':
-            self.m4b_assembly_crispy_radio.SetValue(True)
-            self.m4b_assembly_method = 'crispy'
-        else:
-            self.m4b_assembly_original_radio.SetValue(True)
-            self.m4b_assembly_method = 'original'
-
-        def on_select_m4b_method(event, method):
+        def on_select_m4b_method(method):
             self.m4b_assembly_method = method
             db.save_user_setting('m4b_assembly_method', method)
             print(f"M4B Assembly method set to {method} and saved.")
 
-        self.m4b_assembly_original_radio.Bind(wx.EVT_RADIOBUTTON, lambda event: on_select_m4b_method(event, 'original'))
-        self.m4b_assembly_crispy_radio.Bind(wx.EVT_RADIOBUTTON, lambda event: on_select_m4b_method(event, 'crispy'))
+        def on_m4b_toggle(event):
+            toggled_button = event.GetEventObject()
+            toggled_button.SetValue(True)
+            for toggle in self.m4b_toggles:
+                if toggle != toggled_button:
+                    toggle.SetValue(False)
+            method = 'crispy' if toggled_button == self.m4b_assembly_crispy_toggle else 'original'
+            on_select_m4b_method(method)
+
+        self.m4b_assembly_original_toggle.Bind(wx.EVT_TOGGLEBUTTON, on_m4b_toggle)
+        self.m4b_assembly_crispy_toggle.Bind(wx.EVT_TOGGLEBUTTON, on_m4b_toggle)
+
+        # Load saved setting or set default
+        saved_m4b_method = self.user_settings.get('m4b_assembly_method', 'original')
+        if saved_m4b_method == 'crispy':
+            self.m4b_assembly_crispy_toggle.SetValue(True)
+            self.m4b_assembly_method = 'crispy'
+        else:
+            self.m4b_assembly_original_toggle.SetValue(True)
+            self.m4b_assembly_method = 'original'
 
         sizer.Add(m4b_assembly_label, pos=(5, 0), flag=wx.ALL | wx.ALIGN_CENTER_VERTICAL, border=border)
         sizer.Add(m4b_assembly_panel, pos=(5, 1), flag=wx.ALL, border=border)
 
     def create_synthesis_panel(self):
         # Think and identify layout issue with the folling code
-        panel_box = wx.Panel(self.right_panel, style=wx.SUNKEN_BORDER)
-        panel_box_sizer = wx.StaticBoxSizer(wx.VERTICAL, panel_box, "Audiobook Generation Status")
-        panel_box.SetSizer(panel_box_sizer)
+        # --- Replacement for StaticBoxSizer ---
+        panel_container = wx.Panel(self.right_panel, style=wx.BORDER_THEME)
+        container_sizer = wx.BoxSizer(wx.VERTICAL)
+        panel_container.SetSizer(container_sizer)
 
-        panel = self.synth_panel = wx.Panel(panel_box)
-        panel_box_sizer.Add(panel, 1, wx.ALL | wx.EXPAND, 5)
-        self.right_sizer.Add(panel_box, 1, wx.ALL | wx.EXPAND, 5)
+        label = wx.StaticText(panel_container, label="Audiobook Generation Status")
+        font = label.GetFont()
+        font.SetWeight(wx.FONTWEIGHT_BOLD)
+        label.SetFont(font)
+        container_sizer.Add(label, 0, wx.ALL & ~wx.BOTTOM, 5)
+
+        panel = self.synth_panel = wx.Panel(panel_container)
+        container_sizer.Add(panel, 1, wx.ALL | wx.EXPAND, 5)
+        self.right_sizer.Add(panel_container, 1, wx.ALL | wx.EXPAND, 5)
         sizer = wx.BoxSizer(wx.VERTICAL)
         panel.SetSizer(sizer)
 
@@ -611,7 +728,7 @@ class MainWindow(wx.Frame):
         # Add Progress Bar label:
         self.progress_bar_label = wx.StaticText(panel, label="Synthesis Progress:")
         sizer.Add(self.progress_bar_label, 0, wx.ALL, 5)
-        self.progress_bar = wx.Gauge(panel, range=100, style=wx.GA_PROGRESS)
+        self.progress_bar = CustomGauge(panel, range_val=100)
         self.progress_bar.SetMinSize((-1, 30))
         sizer.Add(self.progress_bar, 0, wx.ALL | wx.EXPAND, 5)
         self.progress_bar_label.Hide()
@@ -651,9 +768,10 @@ class MainWindow(wx.Frame):
             self.output_folder_text_ctrl.SetValue(output_folder)
 
     def on_select_voice(self, event):
-        self.selected_voice = event.GetString()
-        db.save_user_setting('voice', self.selected_voice) # Use db prefix
+        self.selected_voice = self.voice_dropdown.GetValue()
+        db.save_user_setting('voice', self.selected_voice)  # Use db prefix
         print(f"Voice set to {self.selected_voice} and saved.")
+        event.Skip()
 
     def on_set_custom_rate(self, event):
         rate_str = event.GetString()
@@ -813,11 +931,18 @@ class MainWindow(wx.Frame):
                     current_status = item_data.get('status', "⏳ In Progress") # Default to In Progress if it's the current one
 
                 item_display_label = f"{item_box_label} - Status: {current_status}"
-                item_box = wx.StaticBox(self.queue_tab_panel, label=item_display_label)
-                item_sizer = wx.StaticBoxSizer(item_box, wx.VERTICAL)
+                item_container = wx.Panel(self.queue_tab_panel, style=wx.BORDER_THEME)
+                item_sizer = wx.BoxSizer(wx.VERTICAL)
+                item_container.SetSizer(item_sizer)
+
+                label = wx.StaticText(item_container, label=item_display_label)
+                font = label.GetFont()
+                font.SetWeight(wx.FONTWEIGHT_BOLD)
+                label.SetFont(font)
+                item_sizer.Add(label, 0, wx.ALL, 5)
 
                 # Chapters information
-                chapters_str = "All Chapters" # Default if specific chapters aren't listed (e.g. whole book)
+                chapters_str = "All Chapters"  # Default if specific chapters aren't listed (e.g. whole book)
                 if 'chapters' in item_data and isinstance(item_data['chapters'], list):
                     if len(item_data['chapters']) > 3:
                         chapters_str = f"Selected chapters ({len(item_data['chapters'])})"
@@ -831,27 +956,27 @@ class MainWindow(wx.Frame):
                         chapters_str = ", ".join([ch.short_name for ch in item_data['selected_chapter_details']])
 
 
-                chapters_label = wx.StaticText(item_box, label=f"Chapters: {chapters_str}")
+                chapters_label = wx.StaticText(item_container, label=f"Chapters: {chapters_str}")
                 item_sizer.Add(chapters_label, 0, wx.ALL | wx.EXPAND, 5)
 
                 # Synthesis settings
                 settings = item_data.get('synthesis_settings', {})
-                engine_label = wx.StaticText(item_box, label=f"Engine: {settings.get('engine', 'N/A')}")
-                voice_label = wx.StaticText(item_box, label=f"Voice: {settings.get('voice', 'N/A')}")
-                speed_label = wx.StaticText(item_box, label=f"Speed: {settings.get('speed', 'N/A')}")
-                output_label = wx.StaticText(item_box, label=f"Output: {settings.get('output_folder', 'N/A')}")
-                output_label.Wrap(self.window_width // 3) # Wrap text if too long
+                engine_label = wx.StaticText(item_container, label=f"Engine: {settings.get('engine', 'N/A')}")
+                voice_label = wx.StaticText(item_container, label=f"Voice: {settings.get('voice', 'N/A')}")
+                speed_label = wx.StaticText(item_container, label=f"Speed: {settings.get('speed', 'N/A')}")
+                output_label = wx.StaticText(item_container, label=f"Output: {settings.get('output_folder', 'N/A')}")
+                output_label.Wrap(self.window_width // 3)  # Wrap text if too long
 
                 item_sizer.Add(engine_label, 0, wx.ALL | wx.EXPAND, 2)
                 item_sizer.Add(voice_label, 0, wx.ALL | wx.EXPAND, 2)
                 item_sizer.Add(speed_label, 0, wx.ALL | wx.EXPAND, 2)
                 item_sizer.Add(output_label, 0, wx.ALL | wx.EXPAND, 2)
 
-                # Store a reference to the StaticBox in the item_data if needed for updates
-                item_data['_ui_box'] = item_box
+                # Store a reference to the container panel in the item_data if needed for updates
+                item_data['_ui_box'] = item_container
 
                 # Add Remove button for each item
-                remove_button = wx.Button(item_box, label="❌ Remove")
+                remove_button = wx.Button(item_container, label="❌ Remove")
                 # Pass queue_item_id (item_data['id']) to the handler
                 # Ensure item_data['id'] exists and is the correct DB ID for the queue item
                 if 'id' in item_data:
@@ -861,7 +986,7 @@ class MainWindow(wx.Frame):
                     print(f"Warning: Queue item '{item_data.get('book_title')}' is missing an 'id'. Remove button disabled.")
                 item_sizer.Add(remove_button, 0, wx.ALL | wx.ALIGN_CENTER, 5)
 
-                self.queue_tab_sizer.Add(item_sizer, 0, wx.ALL | wx.EXPAND, 10)
+                self.queue_tab_sizer.Add(item_container, 0, wx.ALL | wx.EXPAND, 10)
                 # print(f"DEBUG: Added item_sizer for {item_data.get('book_title')} to queue_tab_sizer.")
 
         # Sizer for action buttons (Run, Schedule) and scheduled time text
@@ -1336,27 +1461,29 @@ class MainWindow(wx.Frame):
         sizer = wx.BoxSizer(wx.VERTICAL)
         panel.SetSizer(sizer)
 
-        self.table = table = wx.ListCtrl(panel, style=wx.LC_REPORT | wx.BORDER_SUNKEN)
-        table.InsertColumn(0, "Included")
-        table.InsertColumn(1, "Chapter Name")
-        table.InsertColumn(2, "Chapter Length")
-        table.InsertColumn(3, "Status")
-        table.SetColumnWidth(0, 80)
-        table.SetColumnWidth(1, 150)
-        table.SetColumnWidth(2, 150)
-        table.SetColumnWidth(3, 100)
-        table.SetSize((250, -1))
-        table.EnableCheckBoxes()
+        agwStyle = ULC_REPORT | ULC_SINGLE_SEL
+        self.table = table = UltimateListCtrl(panel, agwStyle=agwStyle)
+        table.InsertColumn(0, "Included", width=80)
+        table.InsertColumn(1, "Chapter Name", width=150)
+        table.InsertColumn(2, "Chapter Length", width=150)
+        table.InsertColumn(3, "Status", width=100)
+
         table.Bind(wx.EVT_LIST_ITEM_CHECKED, self.on_table_checked)
         table.Bind(wx.EVT_LIST_ITEM_UNCHECKED, self.on_table_unchecked)
         table.Bind(wx.EVT_LIST_ITEM_SELECTED, self.on_table_selected)
 
         # self.good_chapters_list should be available here, set in open_epub
-        for i, chapter in enumerate(document_chapters_list): # Use the passed argument
+        for i, chapter in enumerate(document_chapters_list):  # Use the passed argument
             auto_selected = chapter.is_selected
-            table.Append(['', chapter.short_name, f"{len(chapter.extracted_text):,}"])
+            # ULC uses InsertStringItem with it_kind=1 to create a checkbox item
+            index = table.InsertStringItem(i, "", it_kind=1)
+            table.SetStringItem(index, 1, chapter.short_name)
+            table.SetStringItem(index, 2, f"{len(chapter.extracted_text):,}")
+            table.SetStringItem(index, 3, "") # Status column
             if auto_selected:
-                table.CheckItem(i)
+                item = table.GetItem(index)
+                item.Check(True)
+                table.SetItem(item)
             # Ensure chapter.is_selected is consistent if it wasn't set by open_epub's loop,
             # though it should be. This is more about table checking.
             # chapter.is_selected = auto_selected # This line is redundant if open_epub already set it.
@@ -1393,8 +1520,8 @@ class MainWindow(wx.Frame):
             return
 
         # Retrieve current global synthesis settings
-        current_engine = 'cuda' if self.cuda_radio.GetValue() else 'cpu'
-        current_voice = self.voice_dropdown.GetValue() # This includes the flag
+        current_engine = 'cuda' if self.cuda_toggle.GetValue() else 'cpu'
+        current_voice = self.voice_dropdown.GetValue()  # This includes the flag
         current_speed = self.speed_text_input.GetValue()
         current_output_folder = self.output_folder_text_ctrl.GetValue()
 
@@ -1497,12 +1624,18 @@ class MainWindow(wx.Frame):
             self.staging_tab_sizer.Add(no_books_label, 0, wx.ALL | wx.ALIGN_CENTER, 15)
         else:
             for book in staged_books:
-                book_box = wx.StaticBox(self.staging_tab_panel, label=f"{book['title']} (Author: {book.get('author', 'N/A')})")
-                book_sizer = wx.StaticBoxSizer(book_box, wx.VERTICAL)
+                book_container = wx.Panel(self.staging_tab_panel, style=wx.BORDER_THEME)
+                book_sizer = wx.BoxSizer(wx.VERTICAL)
+                book_container.SetSizer(book_sizer)
+
+                label = wx.StaticText(book_container, label=f"{book['title']} (Author: {book.get('author', 'N/A')})")
+                font = label.GetFont()
+                font.SetWeight(wx.FONTWEIGHT_BOLD)
+                label.SetFont(font)
+                book_sizer.Add(label, 0, wx.ALL, 5)
 
                 # Final Compilation Checkbox for the book
-                # Parent should be book_box for proper visual grouping and lifecycle management with the StaticBox
-                final_comp_checkbox = wx.CheckBox(book_box, label="Enable Final Compilation for this Book")
+                final_comp_checkbox = GenCheckBox(book_container, label="Enable Final Compilation for this Book")
                 final_comp_checkbox.SetValue(book['final_compilation'])
                 final_comp_checkbox.Bind(wx.EVT_CHECKBOX,
                                          lambda evt, b_id=book['id']:
@@ -1510,39 +1643,31 @@ class MainWindow(wx.Frame):
                 book_sizer.Add(final_comp_checkbox, 0, wx.ALL | wx.ALIGN_LEFT, 5)
 
                 # Chapters list for the book
+                chapters_list_ctrl = None
                 if book['chapters']:
-                    # Parent of chapters_list_ctrl should be book_box, not self.staging_tab_panel
-                    chapters_list_ctrl = wx.ListCtrl(book_box, style=wx.LC_REPORT | wx.BORDER_SUNKEN)
+                    agwStyle = ULC_REPORT
+                    chapters_list_ctrl = UltimateListCtrl(book_container, agwStyle=agwStyle)
                     chapters_list_ctrl.InsertColumn(0, "Include", width=70)
-                    chapters_list_ctrl.InsertColumn(1, "Chapter Title", width=200) # Adjust width as needed
+                    chapters_list_ctrl.InsertColumn(1, "Chapter Title", width=200)  # Adjust width as needed
                     chapters_list_ctrl.InsertColumn(2, "Status", width=100)
-                    chapters_list_ctrl.EnableCheckBoxes()
 
                     for i, chap in enumerate(book['chapters']):
-                        chapters_list_ctrl.InsertItem(i, "") # Checkbox column
-                        chapters_list_ctrl.SetItem(i, 1, chap['title'])
-
                         status_display = chap['status']
                         is_completed = chap['status'] == 'completed'
-
                         if is_completed:
                             status_display = "✅ Completed"
-                            # chapters_list_ctrl.SetItem(i, 0, "✓") # Show a checkmark, actual disabling is tricky for LC_Report
 
-                        chapters_list_ctrl.SetItem(i, 2, status_display)
+                        index = chapters_list_ctrl.InsertStringItem(i, "", it_kind=1)
+                        chapters_list_ctrl.SetStringItem(index, 1, chap['title'])
+                        chapters_list_ctrl.SetStringItem(index, 2, status_display)
 
                         if chap['is_selected_for_synthesis'] and not is_completed:
-                            chapters_list_ctrl.CheckItem(i)
+                            item = chapters_list_ctrl.GetItem(index)
+                            item.Check(True)
+                            chapters_list_ctrl.SetItem(item)
 
                         # Store chapter_id with the item for the event handler
-                        chapters_list_ctrl.SetItemData(i, chap['id'])
-
-                        # Disable checkbox for completed items.
-                        # wx.ListCtrl.EnableCheckBoxes() is for the whole control.
-                        # Individual checkbox disabling is not directly supported.
-                        # A workaround is to handle it in the check event or use a different control.
-                        # For now, the status column will indicate completion.
-                        # We can prevent re-checking in the event handler.
+                        chapters_list_ctrl.SetItemData(index, chap['id'])
 
                     # Define event handler for this specific chapters_list_ctrl
                     def create_chapter_check_handler(list_ctrl_instance, book_chapters_data):
@@ -1554,8 +1679,10 @@ class MainWindow(wx.Frame):
 
                             if original_chapter_data and original_chapter_data['status'] == 'completed':
                                 # If chapter is completed, prevent checking/unchecking by reverting the check state
-                                current_ui_checked_state = list_ctrl_instance.IsItemChecked(chapter_idx)
-                                list_ctrl_instance.CheckItem(chapter_idx, not current_ui_checked_state) # Revert
+                                item = list_ctrl_instance.GetItem(chapter_idx)
+                                current_ui_checked_state = item.IsChecked()
+                                item.Check(not current_ui_checked_state) # Revert
+                                list_ctrl_instance.SetItem(item)
                                 wx.MessageBox("This chapter has already been processed and its selection cannot be changed here.",
                                               "Chapter Processed", wx.OK | wx.ICON_INFORMATION)
                                 return
@@ -1569,16 +1696,15 @@ class MainWindow(wx.Frame):
                     chapters_list_ctrl.Bind(wx.EVT_LIST_ITEM_UNCHECKED, handler) # Same handler for uncheck
                     book_sizer.Add(chapters_list_ctrl, 1, wx.ALL | wx.EXPAND, 5)
                 else:
-                    # Parent of no_chapters_label should be book_box
-                    no_chapters_label = wx.StaticText(book_box, label="This book has no chapters.")
+                    no_chapters_label = wx.StaticText(book_container, label="This book has no chapters.")
                     book_sizer.Add(no_chapters_label, 0, wx.ALL, 5)
 
                 # Add "Queue Selected Chapters" button for this book
-                queue_selected_button = wx.Button(book_box, label="▶️ Queue Selected Chapters")
+                queue_selected_button = wx.Button(book_container, label="▶️ Queue Selected Chapters")
                 queue_selected_button.Bind(wx.EVT_BUTTON, lambda evt, b_id=book['id'], b_title=book['title'], list_ctrl=chapters_list_ctrl: self.on_queue_selected_staged_chapters(evt, b_id, b_title, list_ctrl))
                 book_sizer.Add(queue_selected_button, 0, wx.ALL | wx.ALIGN_CENTER, 10)
 
-                self.staging_tab_sizer.Add(book_sizer, 0, wx.ALL | wx.EXPAND, 10)
+                self.staging_tab_sizer.Add(book_container, 0, wx.ALL | wx.EXPAND, 10)
 
         self.staging_tab_panel.SetupScrolling()
         self.staging_tab_panel.Layout()
@@ -1638,7 +1764,7 @@ class MainWindow(wx.Frame):
             })
 
         # Retrieve current global synthesis settings
-        current_engine = 'cuda' if self.cuda_radio.GetValue() else 'cpu'
+        current_engine = 'cuda' if self.cuda_toggle.GetValue() else 'cpu'
         current_voice = self.voice_dropdown.GetValue()
         current_speed = self.speed_text_input.GetValue()
         current_output_folder = self.output_folder_text_ctrl.GetValue()
@@ -1674,7 +1800,7 @@ class MainWindow(wx.Frame):
 
 
     def get_selected_voice(self):
-        return self.selected_voice.split(' ')[1]
+        return self.voice_dropdown.GetValue().split(' ')[1]
 
     def get_selected_speed(self):
         return float(self.selected_speed)
@@ -1716,13 +1842,13 @@ class MainWindow(wx.Frame):
     def on_start(self, event):
         self.synthesis_in_progress = True
         file_path = self.selected_file_path
-        voice = self.selected_voice.split(' ')[1]  # Remove the flag
+        voice = self.voice_dropdown.GetValue().split(' ')[1]
         speed = float(self.selected_speed)
         selected_chapters = [chapter for chapter in self.document_chapters if chapter.is_selected]
         self.start_button.Disable()
         self.params_panel.Disable()
 
-        self.table.EnableCheckBoxes(False)
+        # self.table.EnableCheckBoxes(False) # Not available in UltimateListCtrl
         for chapter_index, chapter in enumerate(self.document_chapters): # document_chapters could be from EPUB or Calibre
             if chapter in selected_chapters:
                 self.set_table_chapter_status(chapter_index, "Planned")
@@ -1944,7 +2070,8 @@ class MainWindow(wx.Frame):
         self.Close()
 
     def set_table_chapter_status(self, chapter_index, status):
-        self.table.SetItem(chapter_index, 3, status)
+        if hasattr(self, 'table') and self.table:
+            self.table.SetStringItem(chapter_index, 3, status)
 
     def open_folder_with_explorer(self, folder_path):
         try:
@@ -1991,7 +2118,7 @@ class ScheduleDialog(wx.Dialog):
         # Date Picker
         date_box = wx.BoxSizer(wx.HORIZONTAL)
         date_label = wx.StaticText(panel, label="Date:")
-        self.date_picker = wx.adv.DatePickerCtrl(panel, style=wx.adv.DP_DEFAULT | wx.adv.DP_SHOWCENTURY)
+        self.date_picker = wx.adv.CalendarCtrl(panel, -1)
 
         # Initialize with current date or saved schedule
         current_schedule_ts = db.load_schedule_time()
@@ -2001,7 +2128,7 @@ class ScheduleDialog(wx.Dialog):
                 initial_date = datetime.fromtimestamp(current_schedule_ts)
             except ValueError: # Handle potential invalid timestamp from DB
                 pass
-        self.date_picker.SetValue(wx.DateTime.FromDMY(initial_date.day, initial_date.month - 1, initial_date.year))
+        self.date_picker.SetDate(wx.DateTime.FromDMY(initial_date.day, initial_date.month - 1, initial_date.year))
 
         date_box.Add(date_label, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 5)
         date_box.Add(self.date_picker, 1, wx.EXPAND)
@@ -2039,7 +2166,7 @@ class ScheduleDialog(wx.Dialog):
         self.CentreOnParent()
 
     def on_ok(self, event):
-        wx_date = self.date_picker.GetValue()
+        wx_date = self.date_picker.GetDate()
         date_val = datetime(wx_date.GetYear(), wx_date.GetMonth() + 1, wx_date.GetDay())
 
         time_str = self.time_picker.GetValue()
