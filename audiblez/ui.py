@@ -28,6 +28,39 @@ import json  # For settings
 from audiblez.voices import voices, flags
 # from audiblez.database import load_all_user_settings, save_user_setting # Now use db. prefix
 
+# Theme definitions
+palettes = {
+    "light": {
+        "background": wx.Colour(240, 240, 240),
+        "text": wx.Colour(0, 0, 0),
+        "text_secondary": wx.Colour(80, 80, 80),
+        "panel": wx.Colour(255, 255, 255),
+        "border": wx.Colour(200, 200, 200),
+        "highlight": wx.Colour(0, 120, 215),
+        "highlight_text": wx.Colour(255, 255, 255),
+        "button_face": None, # wx.SystemSettings.GetColour(wx.SYS_COLOUR_BTNFACE),
+        "button_text": None, # wx.SystemSettings.GetColour(wx.SYS_COLOUR_BTNTEXT),
+        "list_even": wx.Colour(255, 255, 255),
+        "list_odd": wx.Colour(245, 245, 245),
+        "list_header": None, # wx.SystemSettings.GetColour(wx.SYS_COLOUR_BTNFACE),
+    },
+    "dark": {
+        "background": wx.Colour(45, 45, 48),
+        "text": wx.Colour(230, 230, 230),
+        "text_secondary": wx.Colour(180, 180, 180),
+        "panel": wx.Colour(60, 60, 63),
+        "border": wx.Colour(90, 90, 90),
+        "highlight": wx.Colour(90, 156, 248),
+        "highlight_text": wx.Colour(0, 0, 0),
+        "button_face": wx.Colour(75, 75, 78),
+        "button_text": wx.Colour(230, 230, 230),
+        "list_even": wx.Colour(60, 60, 63),
+        "list_odd": wx.Colour(70, 70, 73),
+        "list_header": wx.Colour(80, 80, 83),
+    }
+}
+theme = palettes['light'] # Global theme variable
+
 EVENTS = {
     'CORE_STARTED': NewEvent(),
     'CORE_PROGRESS': NewEvent(),
@@ -63,9 +96,9 @@ class CustomGauge(wx.Panel):
         width, height = self.GetSize()
 
         # These colors will be replaced by theme colors in Phase 2
-        background_color = wx.SystemSettings.GetColour(wx.SYS_COLOUR_BTNFACE)
-        fill_color = wx.SystemSettings.GetColour(wx.SYS_COLOUR_HIGHLIGHT)
-        border_color = wx.SystemSettings.GetColour(wx.SYS_COLOUR_WINDOWFRAME)
+        background_color = theme['panel']
+        fill_color = theme['highlight']
+        border_color = theme['border']
 
         dc.SetBrush(wx.Brush(background_color))
         dc.SetPen(wx.Pen(border_color))
@@ -121,6 +154,7 @@ class MainWindow(wx.Frame):
         screen_width, screen_h = wx.GetDisplaySize()
         self.window_width = int(screen_width * 0.6)
         super().__init__(parent, title=title, size=(self.window_width, self.window_width * 3 // 4))
+        self.theme_name = 'light'
         self.chapters_panel = None
         self.preview_threads = []
         self.selected_chapter = None
@@ -140,6 +174,10 @@ class MainWindow(wx.Frame):
         self.user_settings = db.load_all_user_settings() # Use db prefix
         if not self.user_settings: # Ensure it's a dict
             self.user_settings = {}
+
+        # Apply theme on startup
+        self.theme_name = self.user_settings.get('dark_mode', 'light')
+        self.apply_theme(self.theme_name)
 
         # Initialize core attributes that will be set by UI controls,
         # potentially using loaded settings or defaults.
@@ -401,6 +439,11 @@ class MainWindow(wx.Frame):
         help_button.Bind(wx.EVT_BUTTON, lambda event: self.about_dialog())
         top_sizer.Add(help_button, 0, wx.ALL, 5)
 
+        # Dark Mode Toggle
+        self.dark_mode_toggle = GenCheckBox(top_panel, label="🌙 Dark Mode")
+        self.dark_mode_toggle.Bind(wx.EVT_CHECKBOX, self.on_toggle_dark_mode)
+        top_sizer.Add(self.dark_mode_toggle, 0, wx.ALL | wx.ALIGN_CENTER_VERTICAL, 5)
+
         self.main_sizer = wx.BoxSizer(wx.VERTICAL)
         self.SetSizer(self.main_sizer)
 
@@ -471,6 +514,94 @@ class MainWindow(wx.Frame):
         self.create_right_panel(self.splitter_right) # Use self.splitter_right
         splitter_right_sizer.Add(self.center_panel, 1, wx.ALL | wx.EXPAND, 5)
         splitter_right_sizer.Add(self.right_panel, 1, wx.ALL | wx.EXPAND, 5)
+
+    def on_toggle_dark_mode(self, event):
+        self.theme_name = 'dark' if event.IsChecked() else 'light'
+        db.save_user_setting('dark_mode', self.theme_name)
+        self.apply_theme(self.theme_name)
+
+    def apply_theme(self, theme_name):
+        global theme
+        theme = palettes[theme_name]
+        self.theme_name = theme_name
+
+        # Update the toggle state without firing event
+        is_dark = (theme_name == 'dark')
+        if hasattr(self, 'dark_mode_toggle'):
+            # Block the event to prevent recursion
+            self.dark_mode_toggle.Unbind(wx.EVT_CHECKBOX)
+            self.dark_mode_toggle.SetValue(is_dark)
+            self.dark_mode_toggle.Bind(wx.EVT_CHECKBOX, self.on_toggle_dark_mode)
+
+        # --- Helper function to style a list control ---
+        def style_list_ctrl(list_ctrl):
+            if not list_ctrl: return
+            list_ctrl.SetBackgroundColour(theme['panel'])
+            # ULC does not have SetAlternateRowColour, so we do it manually.
+            for i in range(list_ctrl.GetItemCount()):
+                if i % 2 == 0:
+                    list_ctrl.SetItemBackgroundColour(i, theme['list_even'])
+                else:
+                    list_ctrl.SetItemBackgroundColour(i, theme['list_odd'])
+                list_ctrl.SetItemTextColour(i, theme['text'])
+
+            # Header styling is not supported by ULC in this manner.
+            # The previous attempts to style the header caused crashes.
+            # We will leave the header with its default appearance.
+
+        # --- Recursive function to apply theme to generic controls ---
+        def apply_to_children(parent_widget):
+            if not hasattr(parent_widget, 'GetChildren'): return
+            for child in parent_widget.GetChildren():
+                if not child: continue
+
+                if isinstance(child, (wx.Panel, ScrolledPanel, wx.Dialog)):
+                    child.SetBackgroundColour(theme['background'])
+                    child.SetForegroundColour(theme['text'])
+                    apply_to_children(child) # Recurse
+                elif isinstance(child, wx.StaticText):
+                    child.SetForegroundColour(theme['text'])
+                elif isinstance(child, (wx.Button, wx.ToggleButton)):
+                    child.SetBackgroundColour(theme['button_face'])
+                    child.SetForegroundColour(theme['button_text'])
+                elif isinstance(child, wx.TextCtrl):
+                    child.SetBackgroundColour(theme['panel'])
+                    child.SetForegroundColour(theme['text'])
+                elif isinstance(child, GenCheckBox):
+                    child.SetForegroundColour(theme['text'])
+                elif isinstance(child, wx.ComboCtrl):
+                    child.SetBackgroundColour(theme['panel'])
+                    child.SetForegroundColour(theme['text'])
+                    if child.GetPopupControl() and hasattr(child.GetPopupControl(), 'GetControl'):
+                        popup_listbox = child.GetPopupControl().GetControl()
+                        if popup_listbox:
+                            popup_listbox.SetBackgroundColour(theme['panel'])
+                            popup_listbox.SetForegroundColour(theme['text'])
+
+        # --- Main Theme Application ---
+        self.SetBackgroundColour(theme['background'])
+        self.SetForegroundColour(theme['text'])
+        apply_to_children(self)
+
+        # --- Style Specific Complex Widgets ---
+        if hasattr(self, 'notebook') and self.notebook:
+            self.notebook.SetBackgroundColour(theme['background'])
+            self.notebook.SetTabAreaColour(theme['panel'])
+            self.notebook.SetActiveTabColour(theme['highlight'])
+            self.notebook.SetNonActiveTabTextColour(theme['text_secondary'])
+            self.notebook.SetActiveTabColour(theme['highlight_text'])
+
+        # Style all list controls
+        if hasattr(self, 'table') and self.table:
+            style_list_ctrl(self.table)
+
+        # The staging tab list controls are created dynamically, so we handle them in refresh_staging_tab
+        # by calling apply_theme at the end of that method.
+
+        # Refresh the whole UI to ensure all color changes are applied
+        self.Refresh()
+        self.Layout()
+
 
     def about_dialog(self):
         msg = ("A simple tool to generate audiobooks from EPUB files using Kokoro-82M models\n" +
@@ -1028,6 +1159,7 @@ class MainWindow(wx.Frame):
         if hasattr(self, 'splitter_left') and self.splitter_left:
             self.splitter_left.Layout()
         # self.Layout() # Optionally, layout the whole frame if needed
+        self.apply_theme(self.theme_name)
 
     def update_scheduled_time_display(self):
         if not hasattr(self, 'scheduled_time_text') or not self.scheduled_time_text:
@@ -1710,7 +1842,8 @@ class MainWindow(wx.Frame):
         self.staging_tab_panel.Layout()
         # self.Layout() # Main frame layout, might be too broad, staging_tab_panel.Layout() should suffice.
         self.splitter.Layout() # Layout the main splitter that contains left and right
-        self.Layout() # Full frame layout might be needed if sizers changed overall frame size.
+        self.Layout() # Full frame layout might be ineeded if sizers changed overall frame size.
+        self.apply_theme(self.theme_name)
 
     def update_staging_tab_for_processed_chapters(self, processed_staged_chapter_ids: list[int]):
         """
@@ -2165,6 +2298,29 @@ class ScheduleDialog(wx.Dialog):
         panel.SetSizer(vbox)
         self.CentreOnParent()
 
+        # Apply theme to the dialog
+        panel.SetBackgroundColour(theme['background'])
+        vbox.SetBackgroundColour(theme['background'])
+        instruction.SetForegroundColour(theme['text'])
+        date_label.SetForegroundColour(theme['text'])
+        time_label.SetForegroundColour(theme['text'])
+
+        # Theme controls
+        self.time_picker.SetBackgroundColour(theme['panel'])
+        self.time_picker.SetForegroundColour(theme['text'])
+        ok_button.SetBackgroundColour(theme['button_face'])
+        ok_button.SetForegroundColour(theme['button_text'])
+        clear_button.SetBackgroundColour(theme['button_face'])
+        clear_button.SetForegroundColour(theme['button_text'])
+        cancel_button.SetBackgroundColour(theme['button_face'])
+        cancel_button.SetForegroundColour(theme['button_text'])
+
+        # Theme Calendar
+        self.date_picker.SetBackgroundColour(theme['panel'])
+        self.date_picker.SetForegroundColour(theme['text'])
+        self.date_picker.SetHeaderColours(theme['highlight'], theme['highlight_text'])
+        self.date_picker.SetHighlightColours(theme['highlight'], theme['highlight_text'])
+
     def on_ok(self, event):
         wx_date = self.date_picker.GetDate()
         date_val = datetime(wx_date.GetYear(), wx_date.GetMonth() + 1, wx_date.GetDay())
@@ -2187,9 +2343,20 @@ class ScheduleDialog(wx.Dialog):
         return self.selected_datetime
 
 
+def initialize_palettes():
+    """
+    Initializes the color palettes that depend on wx.SystemSettings.
+    This must be called after the wx.App object has been created.
+    """
+    palettes['light']['button_face'] = wx.SystemSettings.GetColour(wx.SYS_COLOUR_BTNFACE)
+    palettes['light']['button_text'] = wx.SystemSettings.GetColour(wx.SYS_COLOUR_BTNTEXT)
+    palettes['light']['list_header'] = wx.SystemSettings.GetColour(wx.SYS_COLOUR_BTNFACE)
+
+
 def main():
     print('Starting GUI...')
     app = wx.App(False)
+    initialize_palettes()  # Initialize colors after app creation
     frame = MainWindow(None, "Audiblez - Generate Audiobooks from E-books")
     frame.Show(True)
     frame.Layout()
