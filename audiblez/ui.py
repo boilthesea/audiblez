@@ -175,6 +175,17 @@ class MainWindow(wx.Frame):
         if not self.user_settings: # Ensure it's a dict
             self.user_settings = {}
 
+        # Restore window size
+        geometry = self.user_settings.get('window_geometry')
+        if geometry:
+            try:
+                width, height = map(int, geometry.split('x'))
+                self.SetSize((width, height))
+            except (ValueError, TypeError):
+                pass # Ignore invalid geometry string
+
+        self.Bind(wx.EVT_SIZE, self.on_resize)
+
         # Apply theme on startup
         self.theme_name = self.user_settings.get('dark_mode', 'light')
         self.apply_theme(self.theme_name)
@@ -215,6 +226,10 @@ class MainWindow(wx.Frame):
         if default_epub_path.exists():
             wx.CallAfter(self.open_epub, str(default_epub_path))
 
+    def on_resize(self, event):
+        width, height = self.GetSize()
+        db.save_user_setting('window_geometry', f'{width}x{height}')
+        event.Skip()
 
     def on_close_window(self, event):
         if self.schedule_check_timer.IsRunning():
