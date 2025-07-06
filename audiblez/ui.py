@@ -396,7 +396,7 @@ class MainWindow(wx.Frame):
             # Re-enable start button and params if it was a single synthesis
             self.start_button.Enable()
             self.params_panel.Enable()
-            self.table.EnableCheckBoxes(True)
+            if hasattr(self, 'table'): self.table.Enable(True)
 
 
     def create_layout(self):
@@ -1577,7 +1577,7 @@ class MainWindow(wx.Frame):
         # Re-enable global controls if no more items or queue stopped
         self.start_button.Enable()
         self.params_panel.Enable()
-        if hasattr(self, 'table'): self.table.EnableCheckBoxes(True)
+        if hasattr(self, 'table'): self.table.Enable(True)
 
         if self.run_queue_button:
             if self.queue_items: # If some items remain (e.g. user added more)
@@ -1654,7 +1654,12 @@ class MainWindow(wx.Frame):
         return panel
 
     def on_queue_selected_book_portions(self, event):
-        if not hasattr(self, 'selected_book') or not self.selected_book:
+        # A book is considered loaded if it's a regular EPUB (self.selected_book)
+        # or if it's from Calibre (self.book_data).
+        book_is_loaded = (hasattr(self, 'selected_book') and self.selected_book) or \
+                         (hasattr(self, 'book_data') and self.book_data)
+
+        if not book_is_loaded:
             wx.MessageBox("Please open an EPUB file first to select and queue book portions.",
                           "No Book Loaded", wx.OK | wx.ICON_INFORMATION)
             return
@@ -1996,7 +2001,10 @@ class MainWindow(wx.Frame):
         file_path = self.selected_file_path
         voice = self.voice_dropdown.GetValue().split(' ')[1]
         speed = float(self.selected_speed)
-        selected_chapters = [chapter for chapter in self.document_chapters if chapter.is_selected]
+        selected_chapters = []
+        for i in range(self.table.GetItemCount()):
+            if self.table.IsItemChecked(i):
+                selected_chapters.append(self.document_chapters[i])
         self.start_button.Disable()
         self.params_panel.Disable()
 
