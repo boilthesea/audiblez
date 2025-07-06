@@ -634,7 +634,10 @@ def apply_filters(text: str, filter_file_path: str = "audiblez/filter.txt") -> s
         text_changed_overall = False
         for rule_item in rules:  # Changed 'rule' to 'rule_item' to avoid conflict if 'rule' is a var name
             for pattern in rule_item['patterns']:
-                new_text, count = re.subn(re.escape(pattern), rule_item['replacement'], text, flags=re.IGNORECASE)
+                # Use negative lookarounds to ensure we match whole words/abbreviations only.
+                # This prevents matching a filter pattern inside another word (e.g. "rd." in "word.").
+                regex_pattern = r'(?<!\w)' + re.escape(pattern) + r'(?!\w)'
+                new_text, count = re.subn(regex_pattern, rule_item['replacement'], text, flags=re.IGNORECASE)
                 if count > 0:
                     # Corrected f-string and variable names
                     print(f"DEBUG: Applied rule (line {rule_item['line_num']} from '{stream_description_for_debug}'): Replacing '{pattern}' with '{rule_item['replacement']}' ({count} occurrences).")
