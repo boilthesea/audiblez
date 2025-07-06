@@ -51,7 +51,7 @@ palettes = {
         "panel": wx.Colour(60, 60, 63),
         "border": wx.Colour(90, 90, 90),
         "highlight": wx.Colour(90, 156, 248),
-        "highlight_text": wx.Colour(0, 0, 0),
+        "highlight_text": wx.Colour(255, 255, 255),
         "button_face": wx.Colour(75, 75, 78),
         "button_text": wx.Colour(230, 230, 230),
         "list_even": wx.Colour(60, 60, 63),
@@ -568,15 +568,19 @@ class MainWindow(wx.Frame):
                     child.SetBackgroundColour(theme['panel'])
                     child.SetForegroundColour(theme['text'])
                 elif isinstance(child, GenCheckBox):
+                    child.SetBackgroundColour(theme['background'])
                     child.SetForegroundColour(theme['text'])
                 elif isinstance(child, wx.ComboCtrl):
-                    child.SetBackgroundColour(theme['panel'])
-                    child.SetForegroundColour(theme['text'])
+                    # Force light theme for ComboCtrl and its popup to ensure readability in all modes,
+                    # as native listbox text color can be problematic.
+                    light_palette = palettes['light']
+                    child.SetBackgroundColour(light_palette['panel'])
+                    child.SetForegroundColour(light_palette['text'])
                     if child.GetPopupControl() and hasattr(child.GetPopupControl(), 'GetControl'):
                         popup_listbox = child.GetPopupControl().GetControl()
                         if popup_listbox:
-                            popup_listbox.SetBackgroundColour(theme['panel'])
-                            popup_listbox.SetForegroundColour(theme['text'])
+                            popup_listbox.SetBackgroundColour(light_palette['panel'])
+                            popup_listbox.SetForegroundColour(light_palette['text'])
 
         # --- Main Theme Application ---
         self.SetBackgroundColour(theme['background'])
@@ -589,7 +593,7 @@ class MainWindow(wx.Frame):
             self.notebook.SetTabAreaColour(theme['panel'])
             self.notebook.SetActiveTabColour(theme['highlight'])
             self.notebook.SetNonActiveTabTextColour(theme['text_secondary'])
-            self.notebook.SetActiveTabColour(theme['highlight_text'])
+            self.notebook.SetActiveTabTextColour(theme['highlight_text'])
 
         # Style all list controls
         if hasattr(self, 'table') and self.table:
