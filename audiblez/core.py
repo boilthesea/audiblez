@@ -632,15 +632,14 @@ def apply_filters(text: str, filter_file_path: str = "audiblez/filter.txt") -> s
         # Corrected f-string and variable name
         print(f"DEBUG: Loaded {len(rules)} filter rules from '{stream_description_for_debug}'.")
         text_changed_overall = False
-        for rule_item in rules: # Changed 'rule' to 'rule_item' to avoid conflict if 'rule' is a var name
+        for rule_item in rules:  # Changed 'rule' to 'rule_item' to avoid conflict if 'rule' is a var name
             for pattern in rule_item['patterns']:
-                if pattern in text:
-                    new_text = text.replace(pattern, rule_item['replacement'])
-                    if new_text != text:
-                        # Corrected f-string and variable names
-                        print(f"DEBUG: Applied rule (line {rule_item['line_num']} from '{stream_description_for_debug}'): Replacing '{pattern}' with '{rule_item['replacement']}'.")
-                        text = new_text
-                        text_changed_overall = True
+                new_text, count = re.subn(re.escape(pattern), rule_item['replacement'], text, flags=re.IGNORECASE)
+                if count > 0:
+                    # Corrected f-string and variable names
+                    print(f"DEBUG: Applied rule (line {rule_item['line_num']} from '{stream_description_for_debug}'): Replacing '{pattern}' with '{rule_item['replacement']}' ({count} occurrences).")
+                    text = new_text
+                    text_changed_overall = True
 
         if not text_changed_overall:
             print(f"DEBUG: No changes made to the text by filtering with rules from '{stream_description_for_debug}'.")
