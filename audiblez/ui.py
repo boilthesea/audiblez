@@ -1403,8 +1403,10 @@ class MainWindow(wx.Frame):
         # item_to_process['chapters'] comes from db.get_queued_items which gets from queued_chapters table
         for idx, chap_db_info in enumerate(item_to_process.get('chapters', [])):
             chapter_obj = type('ChapterForCore', (), {})()
-            chapter_obj.title = chap_db_info.get('title', 'Unknown Chapter')
-            chapter_obj.short_name = chap_db_info.get('title', 'Unknown Chapter') # For consistency if core uses short_name
+            title = chap_db_info.get('title', 'Unknown Chapter')
+            chapter_obj.title = title
+            chapter_obj.get_name = lambda t=title: t  # Mimic ebooklib chapter for core.py compatibility
+            chapter_obj.short_name = title # For consistency if core uses short_name
             chapter_obj.chapter_index = idx # Index within this synthesis job for UI event
 
             text_content = chap_db_info.get('text_content')
