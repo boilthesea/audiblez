@@ -48,7 +48,8 @@ def create_tables(conn: sqlite3.Connection):
             next_scheduled_run INTEGER, -- Stores Unix timestamp for next schedule
             calibre_ebook_convert_path TEXT, -- Stores path to ebook-convert
             m4b_assembly_method TEXT,
-            dark_mode TEXT
+            dark_mode TEXT,
+            window_geometry TEXT
         )
     """)
 
@@ -60,6 +61,15 @@ def create_tables(conn: sqlite3.Connection):
             pass  # Column already exists, which is fine
         else:
             raise  # Re-raise other operational errors
+
+    # Add window_geometry column for backward compatibility
+    try:
+        cursor.execute("ALTER TABLE user_settings ADD COLUMN window_geometry TEXT")
+    except sqlite3.OperationalError as e:
+        if "duplicate column name" in str(e).lower():
+            pass  # Column already exists
+        else:
+            raise
 
     # Staged Books Table
     cursor.execute("""
@@ -140,7 +150,7 @@ def save_user_setting(setting_name: str, setting_value):
         cursor.execute("SELECT id FROM user_settings WHERE id = 1")
         row = cursor.fetchone()
 
-        valid_columns = ["engine", "voice", "speed", "custom_rate", "next_scheduled_run", "calibre_ebook_convert_path", "m4b_assembly_method", "dark_mode"]
+        valid_columns = ["engine", "voice", "speed", "custom_rate", "next_scheduled_run", "calibre_ebook_convert_path", "m4b_assembly_method", "dark_mode", "window_geometry"]
         if setting_name not in valid_columns:
             print(f"Error: Invalid setting_name '{setting_name}' for update/insert.")
             return # Or raise an error
@@ -183,7 +193,7 @@ def load_user_setting(setting_name: str):
     conn = connect_db()
     cursor = conn.cursor()
     try:
-        valid_columns = ["engine", "voice", "speed", "custom_rate", "next_scheduled_run", "calibre_ebook_convert_path", "m4b_assembly_method", "dark_mode", "id"] # id for validation
+        valid_columns = ["engine", "voice", "speed", "custom_rate", "next_scheduled_run", "calibre_ebook_convert_path", "m4b_assembly_method", "dark_mode", "window_geometry", "id"] # id for validation
         if setting_name not in valid_columns:
             print(f"Error: Invalid setting_name '{setting_name}' for load.")
             # Pass to let SQLite handle "no such column" if it's truly an invalid/new column
@@ -213,7 +223,7 @@ def load_all_user_settings() -> dict:
     settings = {}
     try:
         # Assuming settings are in a single row with id = 1
-        cursor.execute("SELECT engine, voice, speed, custom_rate, next_scheduled_run, calibre_ebook_convert_path, m4b_assembly_method, dark_mode FROM user_settings WHERE id = 1")
+        cursor.execute("SELECT engine, voice, speed, custom_rate, next_scheduled_run, calibre_ebook_convert_path, m4b_assembly_method, dark_mode, window_geometry FROM user_settings WHERE id = 1")
         row = cursor.fetchone()
         if row:
             settings = {
@@ -225,6 +235,7 @@ def load_all_user_settings() -> dict:
                 "calibre_ebook_convert_path": row[5],
                 "m4b_assembly_method": row[6],
                 "dark_mode": row[7],
+                "window_geometry": row[8],
             }
         return settings
     except sqlite3.Error as e:
