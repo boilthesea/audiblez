@@ -12,3 +12,4 @@ chapters.txt
 *.onnx
 dist
 .venv
+*.gi.*

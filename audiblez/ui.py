@@ -212,6 +212,7 @@ class MainWindow(wx.Frame):
 
         # Ensure notebook and tabs are created, then refresh them.
         self.create_notebook_and_tabs()
+        self._create_static_panels() # Create the right-hand side panels
         wx.CallAfter(self._initial_ui_refresh) # Refresh tabs after UI is fully up
 
         # Initialize and start schedule checker
@@ -224,7 +225,7 @@ class MainWindow(wx.Frame):
 
         default_epub_path = Path('../epub/lewis.epub')
         if default_epub_path.exists():
-            wx.CallAfter(self.open_epub, str(default_epub_path))
+            wx.CallAfter(self._load_epub_file, str(default_epub_path))
 
     def on_resize(self, event):
         width, height = self.GetSize()
@@ -471,64 +472,40 @@ class MainWindow(wx.Frame):
         self.main_sizer.Add(top_panel, 0, wx.ALL | wx.EXPAND, 5)
         self.main_sizer.Add(self.splitter, 1, wx.EXPAND) # self.splitter is a Panel that will be split by self.splitter_sizer
 
-        # self.splitter_left, self.splitter_right, and self.notebook are NOT created here.
-        # They will be created in open_epub().
-        # The main area (self.splitter) will be empty initially below the top_panel.
+        # The main content panels (notebook, chapter lists, etc.) are created
+        # in create_notebook_and_tabs() and _create_static_panels() during startup.
 
-    def create_layout_for_ebook(self, splitter_container): # splitter_container is self.splitter (the main one)
-        # This function is called from open_epub, after self.splitter_left and self.notebook are created.
-        # It populates the "Chapters" tab and creates/populates self.splitter_right.
+    def _create_static_panels(self):
+        # This function creates the main UI panels that are always present.
+        # It's called once at startup.
+        self.splitter_right = wx.Panel(self.splitter)
+        self.splitter_sizer.Add(self.splitter_right, 2, wx.ALL | wx.EXPAND, 5)
 
-        # 1. Populate the "Chapters" tab (self.chapters_tab_page)
-        # self.chapters_tab_page is a wx.Panel created in open_epub, acting as a container for the chapter list.
-
-        # Clear any old content from this page container
-        for child in self.chapters_tab_page.GetChildren():
-            child.Destroy()
-
-        # Create the actual chapters list panel (ScrolledPanel) using create_chapters_table_panel.
-        # Its parent will be self.chapters_tab_page.
-        # self.document_chapters is assumed to be set by open_epub.
-        # good_chapters logic is handled within create_chapters_table_panel.
-        self.chapters_panel = self.create_chapters_table_panel(self.document_chapters) # This returns the ScrolledPanel
-
-        # Add this ScrolledPanel (self.chapters_panel) to the sizer of self.chapters_tab_page
-        chapters_page_sizer = wx.BoxSizer(wx.VERTICAL)
-        chapters_page_sizer.Add(self.chapters_panel, 1, wx.EXPAND | wx.ALL) # Add the ScrolledPanel
-        self.chapters_tab_page.SetSizer(chapters_page_sizer)
-        self.chapters_tab_page.Layout()
-
-        # 2. Create and populate self.splitter_right
-        # self.splitter_right should not exist at this point due to cleanup in open_epub
-        self.splitter_right = wx.Panel(splitter_container) # Parent is self.splitter
-        self.splitter_sizer.Add(self.splitter_right, 2, wx.ALL | wx.EXPAND, 5) # Add to main splitter sizer
-
-        # Now, create the content for self.splitter_right: center_panel and right_panel
-        # (These are for text_area, book details, params, synth status)
-        self.center_panel = wx.Panel(self.splitter_right) # Parent is self.splitter_right
+        # Create Center Panel (for text preview)
+        self.center_panel = wx.Panel(self.splitter_right)
         self.center_sizer = wx.BoxSizer(wx.VERTICAL)
         self.center_panel.SetSizer(self.center_sizer)
         self.text_area = wx.TextCtrl(self.center_panel, style=wx.TE_MULTILINE, size=(int(self.window_width * 0.4), -1))
         font = wx.Font(14, wx.MODERN, wx.NORMAL, wx.NORMAL)
         self.text_area.SetFont(font)
-        # On text change, update the extracted_text attribute of the selected_chapter:
-        self.text_area.Bind(wx.EVT_TEXT, lambda event: setattr(self.selected_chapter, 'extracted_text', self.text_area.GetValue()))
-
-        self.chapter_label = wx.StaticText(
-            self.center_panel, label=f'Edit / Preview content for section "{self.selected_chapter.short_name}":')
+        self.text_area.Bind(wx.EVT_TEXT, lambda event: setattr(self.selected_chapter, 'extracted_text', self.text_area.GetValue()) if self.selected_chapter else None)
+        self.chapter_label = wx.StaticText(self.center_panel, label="No chapter selected.")
         preview_button = wx.Button(self.center_panel, label="🔊 Preview")
         preview_button.Bind(wx.EVT_BUTTON, self.on_preview_chapter)
-
         self.center_sizer.Add(self.chapter_label, 0, wx.ALL, 5)
         self.center_sizer.Add(preview_button, 0, wx.ALL, 5)
         self.center_sizer.Add(self.text_area, 1, wx.ALL | wx.EXPAND, 5)
 
-        splitter_right_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        self.splitter_right.SetSizer(splitter_right_sizer) # Use self.splitter_right
+        # Create Right Panel (for details, params, synth)
+        self.create_right_panel(self.splitter_right)
 
-        self.create_right_panel(self.splitter_right) # Use self.splitter_right
+        splitter_right_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        self.splitter_right.SetSizer(splitter_right_sizer)
         splitter_right_sizer.Add(self.center_panel, 1, wx.ALL | wx.EXPAND, 5)
         splitter_right_sizer.Add(self.right_panel, 1, wx.ALL | wx.EXPAND, 5)
+
+        # Initially, these panels might be disabled until a book is loaded.
+        self.splitter_right.Disable()
 
     def on_toggle_dark_mode(self, event):
         self.theme_name = 'dark' if event.IsChecked() else 'light'
@@ -672,23 +649,22 @@ class MainWindow(wx.Frame):
 
         # Add title
         title_label = wx.StaticText(book_details_panel, label="Title:")
-        title_text = wx.StaticText(book_details_panel, label=self.selected_book_title)
+        self.title_text = wx.StaticText(book_details_panel, label="")
+        title_text = self.title_text
         book_details_sizer.Add(title_label, pos=(0, 0), flag=wx.ALL, border=5)
         book_details_sizer.Add(title_text, pos=(0, 1), flag=wx.ALL, border=5)
 
         # Add Author
         author_label = wx.StaticText(book_details_panel, label="Author:")
-        author_text = wx.StaticText(book_details_panel, label=self.selected_book_author)
+        self.author_text = wx.StaticText(book_details_panel, label="")
+        author_text = self.author_text
         book_details_sizer.Add(author_label, pos=(1, 0), flag=wx.ALL, border=5)
         book_details_sizer.Add(author_text, pos=(1, 1), flag=wx.ALL, border=5)
 
         # Add Total length
         length_label = wx.StaticText(book_details_panel, label="Total Length:")
-        if not hasattr(self, 'document_chapters'):
-            total_len = 0
-        else:
-            total_len = sum([len(c.extracted_text) for c in self.document_chapters])
-        length_text = wx.StaticText(book_details_panel, label=f'{total_len:,} characters')
+        self.length_text = wx.StaticText(book_details_panel, label="")
+        length_text = self.length_text
         book_details_sizer.Add(length_label, pos=(2, 0), flag=wx.ALL, border=5)
         book_details_sizer.Add(length_text, pos=(2, 1), flag=wx.ALL, border=5)
 
@@ -974,81 +950,156 @@ class MainWindow(wx.Frame):
             print(f"Invalid speed input: {event.GetString()}")
             # Optionally, reset to last valid speed or show error in UI
 
-    def open_epub(self, file_path):
+    def _load_book_data_into_ui(self, book_title, book_author, document_chapters, source_path, book_object=None, cover_info=None):
         # Cleanup previous dynamic UI parts if they exist
-        if hasattr(self, 'splitter_left') and self.splitter_left:
-            self.splitter_left.Destroy()
-            self.splitter_left = None # Ensure it's cleared
-        if hasattr(self, 'splitter_right') and self.splitter_right:
-            self.splitter_right.Destroy()
-            self.splitter_right = None # Ensure it's cleared
-        # Note: Destroying children of splitter_sizer is implicitly handled by destroying splitter_left/right windows.
-        # self.splitter_sizer.Clear(delete_windows=True) # Alternative, but Destroy() above is often better.
+        # The UI is now static. We just enable the right panel and load data.
+        if hasattr(self, 'splitter_right'):
+            self.splitter_right.Enable()
 
-        self.selected_file_path = file_path
-        print(f"Opening file: {file_path}")
+        # Set instance variables
+        self.selected_book_title = book_title
+        self.selected_book_author = book_author
+        self.document_chapters = document_chapters
+        self.selected_file_path = source_path
+        self.selected_book = book_object
 
-        from ebooklib import epub
-        from audiblez.core import find_document_chapters_and_extract_texts, find_good_chapters, find_cover
+        # Determine "good" chapters. For standard EPUBs, we find them.
+        # For other sources (Calibre/Queue), we assume they are pre-selected.
+        if self.selected_book:
+            from audiblez.core import find_good_chapters
+            self.good_chapters_list = find_good_chapters(self.document_chapters)
+        else:
+            self.good_chapters_list = [ch for ch in self.document_chapters if getattr(ch, 'is_selected', False)]
 
-        # Parse EPUB and extract metadata ONCE
-        book = epub.read_epub(file_path)
-        meta_title = book.get_metadata('DC', 'title')
-        self.selected_book_title = meta_title[0][0] if meta_title else ''
-        meta_creator = book.get_metadata('DC', 'creator')
-        self.selected_book_author = meta_creator[0][0] if meta_creator else ''
-        self.selected_book = book
+        # Process all chapters: set short_name and ensure is_selected is set.
+        for chapter in self.document_chapters:
+            # Set a user-friendly short_name if it doesn't exist
+            if not getattr(chapter, 'short_name', ''):
+                if hasattr(chapter, 'get_name'):
+                    chapter.short_name = chapter.get_name().replace('.xhtml', '').replace('xhtml/', '').replace('.html', '').replace('Text/', '')
+                elif hasattr(chapter, 'title'):
+                    chapter.short_name = chapter.title
+                else:
+                    chapter.short_name = "Unknown Chapter"
 
-        # Determine document chapters ONCE
-        self.document_chapters = find_document_chapters_and_extract_texts(book)
-
-        # Determine good chapters list ONCE and store as instance variable
-        self.good_chapters_list = find_good_chapters(self.document_chapters)
+            # Set selection status. For EPUBs, this is the first time.
+            # For others, it's a confirmation based on good_chapters_list.
+            chapter.is_selected = chapter in self.good_chapters_list
 
         # Determine selected_chapter based on good_chapters_list or document_chapters
         if self.good_chapters_list:
             self.selected_chapter = self.good_chapters_list[0]
-        elif self.document_chapters: # Fallback if no good chapters but document chapters exist
+        elif self.document_chapters:
             self.selected_chapter = self.document_chapters[0]
         else:
             self.selected_chapter = None
-            # Consider: wx.LogWarning("No chapters found in the EPUB.") or similar feedback.
-
-        # Process all chapters for short_name and initial selection status ONCE
-        for chapter in self.document_chapters:
-            chapter.short_name = chapter.get_name().replace('.xhtml', '').replace('xhtml/', '').replace('.html', '').replace('Text/', '')
-            chapter.is_selected = chapter in self.good_chapters_list # Use instance var for consistency
 
         # Create/ensure notebook and tab structure exists
         self.create_notebook_and_tabs()
 
-        # Create right panel and populate chapters tab (which is inside the notebook)
-        self.create_layout_for_ebook(self.splitter) # self.splitter is the parent for splitter_right
+        # 1. Populate the "Chapters" tab
+        for child in self.chapters_tab_page.GetChildren():
+            child.Destroy()
+        self.chapters_panel = self.create_chapters_table_panel(self.document_chapters)
+        chapters_page_sizer = wx.BoxSizer(wx.VERTICAL)
+        chapters_page_sizer.Add(self.chapters_panel, 1, wx.EXPAND | wx.ALL)
+        self.chapters_tab_page.SetSizer(chapters_page_sizer)
+        self.chapters_tab_page.Layout()
 
-        # Update Cover (ensure self.cover_bitmap exists, created in create_right_panel part of create_layout_for_ebook)
+        # 2. Populate the static panels with book data
+        self.title_text.SetLabel(book_title)
+        self.author_text.SetLabel(book_author)
+        total_len = sum([len(c.extracted_text) for c in self.document_chapters])
+        self.length_text.SetLabel(f'{total_len:,} characters')
+        if self.selected_chapter:
+            self.chapter_label.SetLabel(f'Edit / Preview content for section "{self.selected_chapter.short_name}":')
+            self.text_area.SetValue(self.selected_chapter.extracted_text)
+        else:
+            self.chapter_label.SetLabel("No chapter selected.")
+            self.text_area.SetValue("")
+
+        # Update Cover
         if hasattr(self, 'cover_bitmap'):
-            cover = find_cover(book)
-            if cover is not None:
-                pil_image = Image.open(io.BytesIO(cover.content))
-                wx_img = wx.EmptyImage(pil_image.size[0], pil_image.size[1])
-                wx_img.SetData(pil_image.convert("RGB").tobytes())
-                cover_h = 200
-                cover_w = int(cover_h * pil_image.size[0] / pil_image.size[1])
-                wx_img.Rescale(cover_w, cover_h)
-                self.cover_bitmap.SetBitmap(wx_img.ConvertToBitmap())
-                self.cover_bitmap.SetMaxSize((200, cover_h))
+            cover_image_to_load = None
+            if cover_info:
+                if cover_info['type'] == 'epub_cover' and cover_info['content']:
+                    try:
+                        pil_image = Image.open(io.BytesIO(cover_info['content']))
+                        cover_image_to_load = pil_image
+                    except Exception as e:
+                        print(f"Error loading cover from epub content: {e}")
+                elif cover_info['type'] == 'path' and cover_info['content'] and Path(cover_info['content']).exists():
+                    try:
+                        pil_image = Image.open(cover_info['content'])
+                        cover_image_to_load = pil_image
+                    except Exception as e:
+                        print(f"Error loading cover from path {cover_info['content']}: {e}")
+
+            if cover_image_to_load:
+                try:
+                    wx_img = wx.Image(cover_image_to_load.size[0], cover_image_to_load.size[1])
+                    if cover_image_to_load.mode == 'RGBA':
+                        pil_image_rgb = cover_image_to_load.convert('RGB')
+                        wx_img.SetData(pil_image_rgb.tobytes())
+                    else:
+                        wx_img.SetData(cover_image_to_load.convert("RGB").tobytes())
+
+                    cover_h = 200
+                    cover_w = int(cover_h * cover_image_to_load.size[0] / cover_image_to_load.size[1])
+                    if cover_w > 0 and cover_h > 0:
+                        wx_img = wx_img.Scale(cover_w, cover_h, wx.IMAGE_QUALITY_HIGH)
+
+                    self.cover_bitmap.SetBitmap(wx_img.ConvertToBitmap())
+                    self.cover_bitmap.SetMaxSize((200, cover_h))
+                except Exception as e_cover:
+                    print(f"Error processing or displaying cover image: {e_cover}")
+                    self.cover_bitmap.SetBitmap(wx.NullBitmap)
             else:
-                self.cover_bitmap.SetBitmap(wx.NullBitmap) # Clear old cover
+                self.cover_bitmap.SetBitmap(wx.NullBitmap)
 
-        self.refresh_staging_tab() # Now that staging_tab_panel exists
-        self.refresh_queue_tab() # Initial call to set up the queue tab
+        self.refresh_staging_tab()
+        self.refresh_queue_tab()
 
-        self.splitter.Layout() # Layout the main splitter panel
-        self.Layout() # Layout the main frame
+        self.splitter.Layout()
+        self.Layout()
+
 
     def refresh_queue_tab(self):
         # Clear existing content from the queue_tab_panel's sizer
         # print(f"DEBUG: refresh_queue_tab called. self.queue_items: {self.queue_items}")
+        def _load_epub_file(self, file_path):
+            """Helper function to load and process an EPUB file."""
+            print(f"Opening file: {file_path}")
+    
+            from ebooklib import epub
+            from audiblez.core import find_document_chapters_and_extract_texts, find_cover
+            from pathlib import Path
+    
+            try:
+                book = epub.read_epub(file_path)
+                meta_title = book.get_metadata('DC', 'title')
+                title = meta_title[0][0] if meta_title else Path(file_path).stem
+                meta_creator = book.get_metadata('DC', 'creator')
+                author = meta_creator[0][0] if meta_creator else 'Unknown Author'
+    
+                document_chapters = find_document_chapters_and_extract_texts(book)
+    
+                cover = find_cover(book)
+                cover_info = {'type': 'epub_cover', 'content': cover.content} if cover else None
+    
+                # The UI update should happen on the main thread
+                wx.CallAfter(self._load_book_data_into_ui,
+                    book_title=title,
+                    book_author=author,
+                    document_chapters=document_chapters,
+                    source_path=file_path,
+                    book_object=book,
+                    cover_info=cover_info
+                )
+            except Exception as e:
+                print(f"Error opening EPUB file {file_path}: {e}")
+                wx.MessageBox(f"Failed to open or parse the EPUB file:\n\n{e}", "EPUB Error", wx.OK | wx.ICON_ERROR)
+
         if hasattr(self, 'queue_tab_sizer') and self.queue_tab_sizer:
             # Clear the sizer and delete all windows it managed.
             # This is the most common and robust way to reset a sizer's content.
@@ -1373,8 +1424,10 @@ class MainWindow(wx.Frame):
             self.schedule_queue_button.Disable()
 
 
-        self.start_button.Disable() # Disable single start button as well
-        self.params_panel.Disable() # Disable params panel
+        if hasattr(self, 'start_button'):
+            self.start_button.Disable() # Disable single start button as well
+        if hasattr(self, 'params_panel'):
+            self.params_panel.Disable() # Disable params panel
 
         self.process_next_queue_item()
 
@@ -1483,17 +1536,60 @@ class MainWindow(wx.Frame):
              wx.CallAfter(self.process_next_queue_item)
              return
 
+        # NEW: Load this book's data into the UI
+        # This ensures the chapter table is correct for status updates.
+        # We need to find the author from the staged book details if available
+        author = "From Queue"
+        if item_to_process.get('staged_book_id'):
+            staged_book_details = db.get_staged_book_details(item_to_process['staged_book_id'])
+            if staged_book_details and staged_book_details.get('author'):
+                author = staged_book_details.get('author')
 
-        voice_flagged = synthesis_settings.get('voice', self.voice_dropdown.GetValue())
-        voice = voice_flagged.split(' ')[1] if ' ' in voice_flagged else voice_flagged # Remove flag
+        wx.CallAfter(self._load_book_data_into_ui,
+            book_title=book_title,
+            book_author=author,
+            document_chapters=chapters_to_synthesize,
+            source_path=file_path,
+            book_object=None,
+            cover_info=None # Cover not stored in queue, can be added later
+        )
+        # A small delay to allow the UI to update before processing starts
+        import time
+        time.sleep(0.2)
+
+
+        def fail_item(reason):
+            """Helper to fail the current queue item and move to the next."""
+            print(f"Skipping '{book_title}': {reason}.")
+            db.update_queue_item_status(item_to_process['id'], 'error')
+            item_to_process['status'] = f"⚠️ Error ({reason})"
+            self.refresh_queue_tab()
+            self.current_queue_item_index += 1
+            wx.CallAfter(self.process_next_queue_item)
+
+        # --- Validate and extract synthesis settings from the queued item ---
+        voice_flagged = synthesis_settings.get('voice')
+        if not voice_flagged:
+            fail_item("Missing 'voice' setting")
+            return
+        voice = voice_flagged.split(' ')[1] if ' ' in voice_flagged else voice_flagged
 
         try:
-            speed = float(synthesis_settings.get('speed', self.speed_text_input.GetValue()))
-        except ValueError:
-            speed = 1.0
+            speed_str = synthesis_settings.get('speed')
+            if speed_str is None:
+                fail_item("Missing 'speed' setting")
+                return
+            speed = float(speed_str)
+        except (ValueError, TypeError):
+            fail_item(f"Invalid 'speed' setting: {synthesis_settings.get('speed')}")
+            return
 
-        output_folder = synthesis_settings.get('output_folder', self.output_folder_text_ctrl.GetValue())
-        engine = synthesis_settings.get('engine', 'cpu')
+        output_folder = synthesis_settings.get('output_folder')
+        if not output_folder:
+            fail_item("Missing 'output_folder' setting")
+            return
+
+        engine = synthesis_settings.get('engine', 'cpu') # Default to CPU if not specified
 
         # Set device for this specific core.main call
         torch.set_default_device(engine)
@@ -1577,8 +1673,10 @@ class MainWindow(wx.Frame):
         self.refresh_queue_tab()
 
         # Re-enable global controls if no more items or queue stopped
-        self.start_button.Enable()
-        self.params_panel.Enable()
+        if hasattr(self, 'start_button'):
+            self.start_button.Enable()
+        if hasattr(self, 'params_panel'):
+            self.params_panel.Enable()
         if hasattr(self, 'table'): self.table.Enable(True)
 
         if self.run_queue_button:
@@ -2059,7 +2157,7 @@ class MainWindow(wx.Frame):
             if self.synthesis_in_progress:
                 wx.MessageBox("Audiobook synthesis is still in progress. Please wait for it to finish.", "Audiobook Synthesis in Progress")
             else:
-                wx.CallAfter(self.open_epub, file_path)
+                wx.CallAfter(self._load_epub_file, file_path)
 
     def on_open_with_calibre(self, event):
         from audiblez.core import get_calibre_ebook_convert_path, convert_ebook_with_calibre, extract_chapters_and_metadata_from_calibre_html
@@ -2156,62 +2254,22 @@ class MainWindow(wx.Frame):
                 wx.MessageBox(f"Could not extract chapters from the HTML output of '{title_from_meta}'. The book might be empty or in an unexpected format.",
                               "Chapter Extraction Failed", wx.OK | wx.ICON_WARNING)
 
-            # ... (rest of the UI update logic is the same)
-            # Cleanup previous dynamic UI parts
-            if hasattr(self, 'splitter_left') and self.splitter_left: self.splitter_left.Destroy()
-            if hasattr(self, 'splitter_right') and self.splitter_right: self.splitter_right.Destroy()
-            self.splitter_left, self.splitter_right = None, None
-
-            self.selected_file_path = input_ebook_path
+            # Store calibre-specific data that might be used by other functions
             self.book_data = {
                 'cover_image_path': cover_image_path,
                 'metadata': book_metadata
             }
+            
+            cover_info = {'type': 'path', 'content': cover_image_path} if cover_image_path else None
 
-            self.selected_book_title = book_metadata.get('title', Path(input_ebook_path).stem)
-            self.selected_book_author = book_metadata.get('creator', "Unknown Author")
-            self.selected_book = None
-
-            self.document_chapters = extracted_chapters
-            self.good_chapters_list = [ch for ch in self.document_chapters if ch.is_selected]
-
-            if self.document_chapters:
-                self.selected_chapter = self.document_chapters[0]
-            else:
-                self.selected_chapter = None
-
-            self.create_notebook_and_tabs()
-            self.create_layout_for_ebook(self.splitter)
-
-            if hasattr(self, 'cover_bitmap'):
-                if cover_image_path and Path(cover_image_path).exists():
-                    try:
-                        pil_image = Image.open(cover_image_path)
-                        wx_img = wx.Image(pil_image.size[0], pil_image.size[1])
-                        if pil_image.mode == 'RGBA':
-                            pil_image_rgb = pil_image.convert('RGB')
-                            wx_img.SetData(pil_image_rgb.tobytes())
-                        else:
-                             wx_img.SetData(pil_image.convert("RGB").tobytes())
-
-                        cover_h = 200
-                        cover_w = int(cover_h * pil_image.size[0] / pil_image.size[1])
-                        if cover_w > 0 and cover_h > 0 :
-                            wx_img = wx_img.Scale(cover_w, cover_h, wx.IMAGE_QUALITY_HIGH)
-
-                        self.cover_bitmap.SetBitmap(wx_img.ConvertToBitmap())
-                        self.cover_bitmap.SetMaxSize((200, cover_h))
-                        self.book_info_panel.Layout()
-                    except Exception as e_cover:
-                        print(f"Error loading or displaying cover image '{cover_image_path}': {e_cover}")
-                        self.cover_bitmap.SetBitmap(wx.NullBitmap)
-                else:
-                    self.cover_bitmap.SetBitmap(wx.NullBitmap)
-
-            self.refresh_staging_tab()
-            self.refresh_queue_tab()
-            self.splitter.Layout()
-            self.Layout()
+            self._load_book_data_into_ui(
+                book_title=book_metadata.get('title', Path(input_ebook_path).stem),
+                book_author=book_metadata.get('creator', "Unknown Author"),
+                document_chapters=extracted_chapters,
+                source_path=input_ebook_path,
+                book_object=None, # No epub object for calibre
+                cover_info=cover_info
+            )
 
             if extracted_chapters:
                 wx.MessageBox(f"Successfully processed '{self.selected_book_title}' using Calibre.",
