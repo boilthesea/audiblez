@@ -427,7 +427,11 @@ def concat_wavs_with_ffmpeg_crispy(chapter_files: list[Path], output_folder: str
             for wav_file_abs in chapter_files:
                 # Use relative paths in the list file
                 wav_file_relative = wav_file_abs.relative_to(output_path)
-                f.write(f"file '{wav_file_relative.as_posix()}'\n")
+                # Escape single quotes for ffmpeg concat demuxer, which uses a shell-like syntax.
+                # A single quote is escaped by ending the string, adding an escaped quote, and starting a new string.
+                # e.g., "it's" becomes "it'\''s"
+                safe_path = wav_file_relative.as_posix().replace("'", r"'\''")
+                f.write(f"file '{safe_path}'\n")
 
         command = [
             'ffmpeg', '-y', '-f', 'concat', '-safe', '0',
