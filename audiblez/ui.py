@@ -1064,42 +1064,43 @@ class MainWindow(wx.Frame):
         self.Layout()
 
 
+
+    def _load_epub_file(self, file_path):
+        """Helper function to load and process an EPUB file."""
+        print(f"Opening file: {file_path}")
+    
+        from ebooklib import epub
+        from audiblez.core import find_document_chapters_and_extract_texts, find_cover
+        from pathlib import Path
+    
+        try:
+            book = epub.read_epub(file_path)
+            meta_title = book.get_metadata('DC', 'title')
+            title = meta_title[0][0] if meta_title else Path(file_path).stem
+            meta_creator = book.get_metadata('DC', 'creator')
+            author = meta_creator[0][0] if meta_creator else 'Unknown Author'
+    
+            document_chapters = find_document_chapters_and_extract_texts(book)
+    
+            cover = find_cover(book)
+            cover_info = {'type': 'epub_cover', 'content': cover.content} if cover else None
+    
+            # The UI update should happen on the main thread
+            wx.CallAfter(self._load_book_data_into_ui,
+                book_title=title,
+                book_author=author,
+                document_chapters=document_chapters,
+                source_path=file_path,
+                book_object=book,
+                cover_info=cover_info
+            )
+        except Exception as e:
+            print(f"Error opening EPUB file {file_path}: {e}")
+            wx.MessageBox(f"Failed to open or parse the EPUB file:\n\n{e}", "EPUB Error", wx.OK | wx.ICON_ERROR)
+
     def refresh_queue_tab(self):
         # Clear existing content from the queue_tab_panel's sizer
         # print(f"DEBUG: refresh_queue_tab called. self.queue_items: {self.queue_items}")
-        def _load_epub_file(self, file_path):
-            """Helper function to load and process an EPUB file."""
-            print(f"Opening file: {file_path}")
-    
-            from ebooklib import epub
-            from audiblez.core import find_document_chapters_and_extract_texts, find_cover
-            from pathlib import Path
-    
-            try:
-                book = epub.read_epub(file_path)
-                meta_title = book.get_metadata('DC', 'title')
-                title = meta_title[0][0] if meta_title else Path(file_path).stem
-                meta_creator = book.get_metadata('DC', 'creator')
-                author = meta_creator[0][0] if meta_creator else 'Unknown Author'
-    
-                document_chapters = find_document_chapters_and_extract_texts(book)
-    
-                cover = find_cover(book)
-                cover_info = {'type': 'epub_cover', 'content': cover.content} if cover else None
-    
-                # The UI update should happen on the main thread
-                wx.CallAfter(self._load_book_data_into_ui,
-                    book_title=title,
-                    book_author=author,
-                    document_chapters=document_chapters,
-                    source_path=file_path,
-                    book_object=book,
-                    cover_info=cover_info
-                )
-            except Exception as e:
-                print(f"Error opening EPUB file {file_path}: {e}")
-                wx.MessageBox(f"Failed to open or parse the EPUB file:\n\n{e}", "EPUB Error", wx.OK | wx.ICON_ERROR)
-
         if hasattr(self, 'queue_tab_sizer') and self.queue_tab_sizer:
             # Clear the sizer and delete all windows it managed.
             # This is the most common and robust way to reset a sizer's content.
