@@ -435,6 +435,11 @@ class MainWindow(wx.Frame):
         open_calibre_button.Bind(wx.EVT_BUTTON, self.on_open_with_calibre)
         top_sizer.Add(open_calibre_button, 0, wx.ALL, 5)
 
+        # Open with Calibre (exp) button
+        open_calibre_exp_button = wx.Button(top_panel, label="🧪 Open with Calibre (exp)")
+        open_calibre_exp_button.Bind(wx.EVT_BUTTON, self.on_open_with_calibre_experimental)
+        top_sizer.Add(open_calibre_exp_button, 0, wx.ALL, 5)
+
         # Open Markdown .md
         # open_md_button = wx.Button(top_panel, label="📁 Open Markdown (.md)")
         # open_md_button.Bind(wx.EVT_BUTTON, self.on_open)
@@ -2285,6 +2290,73 @@ class MainWindow(wx.Frame):
                     print(f"Error cleaning up temporary directory {temp_html_output_dir}: {e}")
             if wx.IsBusy():
                 wx.EndBusyCursor()
+
+    def on_open_with_calibre_experimental(self, event):
+        from audiblez.new_parser import open_book_experimental
+        from types import SimpleNamespace
+        
+        wildcard_str = "Ebook files (*.epub;*.mobi;*.azw;*.azw3;*.fb2;*.lit;*.pdf)|*.epub;*.mobi;*.azw;*.azw3;*.fb2;*.lit;*.pdf|All files (*.*)|*.*"
+        with wx.FileDialog(self, "Select Ebook for Experimental Parser", wildcard=wildcard_str,
+                           style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST) as dialog:
+            if dialog.ShowModal() == wx.ID_CANCEL:
+                return
+            input_ebook_path = dialog.GetPath()
+
+        def ask_user_for_calibre_path_gui():
+            info_message = (
+                "Audiblez needs to know where Calibre is installed to convert this book format.\n\n"
+                "Please locate the 'ebook-convert' program inside your Calibre installation folder.\n\n"
+                "More specifically, find the directory containing both 'ebook-convert' and 'calibre-debug'.\n\n"
+                "- On Windows, this is often 'C:\\Program Files\\Calibre2\\'.\n"
+                "- On macOS, this is usually in '/Applications/calibre.app/Contents/MacOS/'.\n\n"
+                "The folder containing this file should also have 'calibre-debug'."
+            )
+            dialog = wx.MessageDialog(self, info_message, "Locate Calibre Program", wx.OK | wx.CANCEL | wx.ICON_INFORMATION)
+            if dialog.ShowModal() == wx.ID_OK:
+                dir_dialog = wx.DirDialog(self, "Choose Calibre Directory", style=wx.DD_DEFAULT_STYLE)
+                if dir_dialog.ShowModal() == wx.ID_OK:
+                    return dir_dialog.GetPath()
+                dir_dialog.Destroy()
+            dialog.Destroy()
+            return None
+
+        result, chapters, metadata = open_book_experimental(input_ebook_path, ask_user_for_calibre_path_gui)
+        
+        if not chapters:
+            wx.MessageBox(f"Failed to open book with experimental parser: {result}", "Error", wx.OK | wx.ICON_ERROR)
+            return
+
+        document_chapters = []
+        for i, chapter_data in enumerate(chapters):
+            chapter_obj = SimpleNamespace()
+            chapter_obj.title = chapter_data.get('title', f"Chapter {i+1}")
+            chapter_obj.short_name = chapter_obj.title
+            chapter_obj.extracted_text = chapter_data.get('extracted_text', '')
+            chapter_obj.is_selected = True
+            chapter_obj.chapter_index = i
+            chapter_obj.get_name = lambda: chapter_obj.title
+            chapter_obj.get_type = lambda: "experimental_chapter"
+            document_chapters.append(chapter_obj)
+
+        book_title = "Unknown Title"
+        book_author = "Unknown Author"
+        if isinstance(metadata, dict):
+            book_title = metadata.get('title', ["Unknown Title"])[0]
+            book_author = metadata.get('creator', ["Unknown Author"])[0]
+        elif hasattr(metadata, 'get'):
+            book_title = metadata.get('title', ["Unknown Title"])[0][0]
+            book_author = metadata.get('creator', ["Unknown Author"])[0][0]
+
+        wx.CallAfter(self._load_book_data_into_ui,
+            book_title=book_title,
+            book_author=book_author,
+            document_chapters=document_chapters,
+            source_path=input_ebook_path,
+            book_object=None,
+            cover_info=None
+        )
+
+        wx.MessageBox(f"Successfully opened book with experimental parser. Method: {result}", "Success", wx.OK | wx.ICON_INFORMATION)
 
 
     def on_exit(self, event):
