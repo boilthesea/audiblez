@@ -2320,7 +2320,7 @@ class MainWindow(wx.Frame):
             dialog.Destroy()
             return None
 
-        result, chapters, metadata = open_book_experimental(input_ebook_path, ask_user_for_calibre_path_gui)
+        result, chapters, metadata, cover_info = open_book_experimental(input_ebook_path, ask_user_for_calibre_path_gui)
         
         if not chapters:
             wx.MessageBox(f"Failed to open book with experimental parser: {result}", "Error", wx.OK | wx.ICON_ERROR)
@@ -2344,8 +2344,8 @@ class MainWindow(wx.Frame):
             book_title = metadata.get('title', ["Unknown Title"])[0]
             book_author = metadata.get('creator', ["Unknown Author"])[0]
         elif hasattr(metadata, 'get'):
-            book_title = metadata.get('title', ["Unknown Title"])[0][0]
-            book_author = metadata.get('creator', ["Unknown Author"])[0][0]
+            book_title = metadata.get('title', [("Unknown Title", {})])[0][0]
+            book_author = metadata.get('creator', [("Unknown Author", {})])[0][0]
 
         wx.CallAfter(self._load_book_data_into_ui,
             book_title=book_title,
@@ -2353,7 +2353,7 @@ class MainWindow(wx.Frame):
             document_chapters=document_chapters,
             source_path=input_ebook_path,
             book_object=None,
-            cover_info=None
+            cover_info=cover_info
         )
 
         wx.MessageBox(f"Successfully opened book with experimental parser. Method: {result}", "Success", wx.OK | wx.ICON_INFORMATION)

@@ -82,7 +82,12 @@ def open_book_experimental(file_path, ui_callback_for_path_selection):
             opf_dir = os.path.dirname(rootfile_path)
 
             chapters_with_text = extract_chapters_with_calibre(chapters, file_path, opf_dir, ui_callback_for_path_selection)
-            return "TOC extracted with ebooklib", chapters_with_text, book.metadata
+            
+            from audiblez.core import find_cover
+            cover = find_cover(book)
+            cover_info = {'type': 'epub_cover', 'content': cover.content} if cover else None
+
+            return "TOC extracted with ebooklib", chapters_with_text, book.metadata, cover_info
     except Exception as e:
         print(f"Parser: ebooklib failed to open the book. Reason: {e}")
 
@@ -99,10 +104,28 @@ def open_book_experimental(file_path, ui_callback_for_path_selection):
                 # Get the directory of the rootfile, which is needed to resolve relative paths in the OPF
                 opf_dir = os.path.dirname(rootfile_path)
 
-                # Read the rootfile to find the TOC
-                rootfile = z.read(rootfile_path)
-                root = ET.fromstring(rootfile)
+                # Read the rootfile to find the TOC and metadata
+                rootfile_content = z.read(rootfile_path)
+                root = ET.fromstring(rootfile_content)
                 
+                # --- Metadata Extraction from OPF ---
+                metadata = {}
+                for meta_element in root.findall('.//{http://purl.org/dc/elements/1.1/}title'):
+                    metadata['title'] = [meta_element.text]
+                for meta_element in root.findall('.//{http://purl.org/dc/elements/1.1/}creator'):
+                    metadata['creator'] = [meta_element.text]
+
+                # --- Cover Extraction from OPF ---
+                cover_info = None
+                meta_cover = root.find('.//meta[@name="cover"]')
+                if meta_cover is not None:
+                    cover_id = meta_cover.attrib['content']
+                    cover_href = root.find(f'.//*[@id="{cover_id}"]').attrib['href']
+                    cover_path = os.path.join(opf_dir, cover_href).replace('\\', '/')
+                    if cover_path in z.namelist():
+                        cover_content = z.read(cover_path)
+                        cover_info = {'type': 'epub_cover', 'content': cover_content}
+
                 # Find the toc.ncx file path
                 toc_id = root.find('.//*[@media-type="application/x-dtbncx+xml"]').attrib['id']
                 toc_href = root.find(f'.//*[@id="{toc_id}"]').attrib['href']
@@ -121,7 +144,7 @@ def open_book_experimental(file_path, ui_callback_for_path_selection):
                 
                 print("Parser: Successfully extracted and parsed toc.ncx from zip.")
                 chapters_with_text = extract_chapters_with_calibre(chapters, file_path, opf_dir, ui_callback_for_path_selection)
-                return "TOC extracted from zip", chapters_with_text, None
+                return "TOC extracted from zip", chapters_with_text, metadata, cover_info
 
     except Exception as e:
         print(f"Parser: Failed to extract TOC from zip. Reason: {e}")
