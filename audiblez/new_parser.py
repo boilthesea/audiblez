@@ -15,7 +15,7 @@ def extract_chapters_with_calibre(chapters, epub_path, opf_dir, ui_callback_for_
 
     extracted_chapters = []
     for chapter_info in chapters:
-        html_path = os.path.join(temp_dir, opf_dir, chapter_info['src']).replace('\\', '/')
+        html_path = os.path.join(temp_dir, opf_dir, chapter_info['src'])
         if os.path.exists(html_path):
             # Using a simplified conversion to text. A more robust solution might convert to a clean HTML snippet first.
             text_content = convert_html_to_text(html_path, ui_callback_for_path_selection)
@@ -115,7 +115,8 @@ def open_book_experimental(file_path, ui_callback_for_path_selection):
                 chapters = []
                 for nav_point in toc_root.findall('.//{http://www.daisy.org/z3986/2005/ncx/}navPoint'):
                     title = nav_point.find('.//{http://www.daisy.org/z3986/2005/ncx/}text').text
-                    src = nav_point.find('.//{http://www.daisy.org/z3986/2005/ncx/}content').attrib['src']
+                    src_parts = nav_point.find('.//{http://www.daisy.org/z3986/2005/ncx/}content').attrib['src'].split('#')
+                    src = src_parts[0]
                     chapters.append({'title': title, 'src': src})
                 
                 print("Parser: Successfully extracted and parsed toc.ncx from zip.")
