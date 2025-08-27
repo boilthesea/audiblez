@@ -69,10 +69,20 @@ def open_book_experimental(file_path, ui_callback_for_path_selection):
             print("Parser: Successfully extracted TOC with ebooklib.")
             chapters = []
             for link in book.toc:
-                item = book.get_item_with_href(link.href)
-                chapters.append({'title': link.title, 'src': item.file_name, 'extracted_text': item.content})
+                if isinstance(link, epub.Link):
+                    item = book.get_item_with_href(link.href)
+                    chapters.append({'title': link.title, 'src': item.file_name})
+                elif isinstance(link, tuple) and len(link) > 1 and hasattr(link[0], 'title') and hasattr(link[0], 'href'):
+                    # Handle nested chapters, which ebooklib returns as tuples
+                    item = book.get_item_with_href(link[0].href)
+                    chapters.append({'title': link[0].title, 'src': item.file_name})
+            
+            # Find the opf file directory
+            rootfile_path = book.opf_file
+            opf_dir = os.path.dirname(rootfile_path)
 
-            return "TOC extracted with ebooklib", chapters, book.metadata
+            chapters_with_text = extract_chapters_with_calibre(chapters, file_path, opf_dir, ui_callback_for_path_selection)
+            return "TOC extracted with ebooklib", chapters_with_text, book.metadata
     except Exception as e:
         print(f"Parser: ebooklib failed to open the book. Reason: {e}")
 
