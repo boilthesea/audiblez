@@ -121,7 +121,7 @@ def open_book_experimental(file_path, ui_callback_for_path_selection):
                 meta_cover = root.find('.//meta[@name="cover"]')
                 if meta_cover is not None:
                     cover_id = meta_cover.attrib['content']
-                    cover_href_tag = root.find(f'.//*[@id="{cover_id}"])
+                    cover_href_tag = root.find(f'.//*[@id="{cover_id}"]')
                     if cover_href_tag is not None:
                         cover_href = cover_href_tag.attrib['href']
                         cover_path = os.path.join(opf_dir, cover_href).replace('\\', '/')
@@ -172,9 +172,21 @@ def open_book_experimental(file_path, ui_callback_for_path_selection):
                         print(f"Parser: Calibre cover extraction failed: {e}")
 
                 # Find the toc.ncx file path
-                toc_id = root.find('.//*[@media-type="application/x-dtbncx+xml"]').attrib['id']
-                toc_href = root.find(f'.//*[@id="{toc_id}"])
-                toc_path = os.path.join(opf_dir, toc_href).replace('\\', '/')
+                toc_id_element = root.find('.//*[@media-type="application/x-dtbncx+xml"]')
+                if toc_id_element is not None:
+                    toc_id = toc_id_element.attrib['id']
+                    toc_href_element = root.find(f'.//*[@id="{toc_id}"]')
+                    if toc_href_element is not None:
+                        toc_href = toc_href_element.attrib['href']
+                        toc_path = os.path.join(opf_dir, toc_href).replace('\\', '/')
+                    else:
+                        # Handle case where toc href is not found
+                        print("Parser: Could not find toc href element.")
+                        toc_path = None
+                else:
+                    # Handle case where toc id is not found
+                    print("Parser: Could not find toc id element.")
+                    toc_path = None
                 
                 # Extract and parse the toc.ncx
                 toc_content = z.read(toc_path)
@@ -202,6 +214,7 @@ def open_book_experimental(file_path, ui_callback_for_path_selection):
     )
     if html_file_path:
         chapters, metadata = extract_chapters_and_metadata_from_calibre_html(html_file_path, opf_file_path)
-        return "Chapters extracted with Calibre", chapters, metadata
-
-    return "Failed to open book", None, None
+        cover_info = {'type': 'calibre_cover', 'content': open(cover_image_path, 'rb').read()} if cover_image_path else None
+        return "Chapters extracted with Calibre", chapters, metadata, cover_info
+    
+    return "Failed to open book", None, None, None
