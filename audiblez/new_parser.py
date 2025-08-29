@@ -85,7 +85,11 @@ def open_book_experimental(file_path, ui_callback_for_path_selection):
             
             from audiblez.core import find_cover
             cover = find_cover(book)
-            cover_info = {'type': 'epub_cover', 'content': cover.content} if cover else None
+            cover_info = None
+            if cover and cover.content:
+                with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as temp_cover_file:
+                    temp_cover_file.write(cover.content)
+                    cover_info = {'type': 'path', 'content': temp_cover_file.name}
 
             return "TOC extracted with ebooklib", chapters_with_text, book.metadata, cover_info
     except Exception as e:
@@ -127,7 +131,9 @@ def open_book_experimental(file_path, ui_callback_for_path_selection):
                         cover_path = os.path.join(opf_dir, cover_href).replace('\\', '/')
                         if cover_path in z.namelist():
                             cover_content = z.read(cover_path)
-                            cover_info = {'type': 'epub_cover', 'content': cover_content}
+                            with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as temp_cover_file:
+                                temp_cover_file.write(cover_content)
+                                cover_info = {'type': 'path', 'content': temp_cover_file.name}
 
                 # Strategy 2: Look for item with id="cover"
                 if not cover_info:
@@ -137,7 +143,9 @@ def open_book_experimental(file_path, ui_callback_for_path_selection):
                         cover_path = os.path.join(opf_dir, cover_href).replace('\\', '/')
                         if cover_path in z.namelist():
                             cover_content = z.read(cover_path)
-                            cover_info = {'type': 'epub_cover', 'content': cover_content}
+                            with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as temp_cover_file:
+                                temp_cover_file.write(cover_content)
+                                cover_info = {'type': 'path', 'content': temp_cover_file.name}
 
                 # Strategy 3: Look for item with "cover" in the href
                 if not cover_info:
@@ -147,7 +155,9 @@ def open_book_experimental(file_path, ui_callback_for_path_selection):
                             cover_path = os.path.join(opf_dir, cover_href).replace('\\', '/')
                             if cover_path in z.namelist():
                                 cover_content = z.read(cover_path)
-                                cover_info = {'type': 'epub_cover', 'content': cover_content}
+                                with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as temp_cover_file:
+                                    temp_cover_file.write(cover_content)
+                                    cover_info = {'type': 'path', 'content': temp_cover_file.name}
                                 break
 
                 # Strategy 4: Use Calibre to extract the cover
@@ -164,10 +174,8 @@ def open_book_experimental(file_path, ui_callback_for_path_selection):
                             command = [ebook_convert_exe, file_path, temp_cover_path]
                             subprocess.run(command, check=True, capture_output=True, text=True)
                             if os.path.exists(temp_cover_path):
-                                with open(temp_cover_path, 'rb') as f:
-                                    cover_content = f.read()
-                                cover_info = {'type': 'epub_cover', 'content': cover_content}
-                                os.remove(temp_cover_path)
+                                # The cover is already at temp_cover_path, so just use it.
+                                cover_info = {'type': 'path', 'content': temp_cover_path}
                     except Exception as e:
                         print(f"Parser: Calibre cover extraction failed: {e}")
 
@@ -214,7 +222,7 @@ def open_book_experimental(file_path, ui_callback_for_path_selection):
     )
     if html_file_path:
         chapters, metadata = extract_chapters_and_metadata_from_calibre_html(html_file_path, opf_file_path)
-        cover_info = {'type': 'calibre_cover', 'content': open(cover_image_path, 'rb').read()} if cover_image_path else None
+        cover_info = {'type': 'path', 'content': cover_image_path} if cover_image_path else None
         return "Chapters extracted with Calibre", chapters, metadata, cover_info
     
     return "Failed to open book", None, None, None

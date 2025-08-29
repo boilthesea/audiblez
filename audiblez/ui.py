@@ -2347,6 +2347,12 @@ class MainWindow(wx.Frame):
             book_title = metadata.get('title', [("Unknown Title", {})])[0][0]
             book_author = metadata.get('creator', [("Unknown Author", {})])[0][0]
 
+        cover_image_path = cover_info['content'] if cover_info and cover_info.get('type') == 'path' else None
+        self.book_data = {
+            'cover_image_path': cover_image_path,
+            'metadata': metadata
+        }
+
         wx.CallAfter(self._load_book_data_into_ui,
             book_title=book_title,
             book_author=book_author,
