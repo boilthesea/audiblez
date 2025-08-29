@@ -117,18 +117,63 @@ def open_book_experimental(file_path, ui_callback_for_path_selection):
 
                 # --- Cover Extraction from OPF ---
                 cover_info = None
+                # Strategy 1: Look for <meta name="cover">
                 meta_cover = root.find('.//meta[@name="cover"]')
                 if meta_cover is not None:
                     cover_id = meta_cover.attrib['content']
-                    cover_href = root.find(f'.//*[@id="{cover_id}"]').attrib['href']
-                    cover_path = os.path.join(opf_dir, cover_href).replace('\\', '/')
-                    if cover_path in z.namelist():
-                        cover_content = z.read(cover_path)
-                        cover_info = {'type': 'epub_cover', 'content': cover_content}
+                    cover_href_tag = root.find(f'.//*[@id="{cover_id}"])
+                    if cover_href_tag is not None:
+                        cover_href = cover_href_tag.attrib['href']
+                        cover_path = os.path.join(opf_dir, cover_href).replace('\\', '/')
+                        if cover_path in z.namelist():
+                            cover_content = z.read(cover_path)
+                            cover_info = {'type': 'epub_cover', 'content': cover_content}
+
+                # Strategy 2: Look for item with id="cover"
+                if not cover_info:
+                    cover_item = root.find('.//*[@id="cover"]')
+                    if cover_item is not None:
+                        cover_href = cover_item.attrib['href']
+                        cover_path = os.path.join(opf_dir, cover_href).replace('\\', '/')
+                        if cover_path in z.namelist():
+                            cover_content = z.read(cover_path)
+                            cover_info = {'type': 'epub_cover', 'content': cover_content}
+
+                # Strategy 3: Look for item with "cover" in the href
+                if not cover_info:
+                    for item in root.findall('.//opf:item', namespaces={'opf': 'http://www.idpf.org/2007/opf'}):
+                        if 'cover' in item.attrib.get('href', '').lower() and item.attrib.get('media-type', '').startswith('image'):
+                            cover_href = item.attrib['href']
+                            cover_path = os.path.join(opf_dir, cover_href).replace('\\', '/')
+                            if cover_path in z.namelist():
+                                cover_content = z.read(cover_path)
+                                cover_info = {'type': 'epub_cover', 'content': cover_content}
+                                break
+
+                # Strategy 4: Use Calibre to extract the cover
+                if not cover_info:
+                    print("Parser: Falling back to Calibre to extract cover.")
+                    try:
+                        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as temp_cover_file:
+                            temp_cover_path = temp_cover_file.name
+                        
+                        from audiblez.core import get_calibre_ebook_convert_path
+                        import subprocess
+                        ebook_convert_exe = get_calibre_ebook_convert_path(ui_callback_for_path_selection)
+                        if ebook_convert_exe:
+                            command = [ebook_convert_exe, file_path, temp_cover_path]
+                            subprocess.run(command, check=True, capture_output=True, text=True)
+                            if os.path.exists(temp_cover_path):
+                                with open(temp_cover_path, 'rb') as f:
+                                    cover_content = f.read()
+                                cover_info = {'type': 'epub_cover', 'content': cover_content}
+                                os.remove(temp_cover_path)
+                    except Exception as e:
+                        print(f"Parser: Calibre cover extraction failed: {e}")
 
                 # Find the toc.ncx file path
                 toc_id = root.find('.//*[@media-type="application/x-dtbncx+xml"]').attrib['id']
-                toc_href = root.find(f'.//*[@id="{toc_id}"]').attrib['href']
+                toc_href = root.find(f'.//*[@id="{toc_id}"])
                 toc_path = os.path.join(opf_dir, toc_href).replace('\\', '/')
                 
                 # Extract and parse the toc.ncx
