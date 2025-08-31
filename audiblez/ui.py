@@ -26,6 +26,7 @@ import audiblez.database as db  # Changed import for clarity
 import json  # For settings
 
 from audiblez.voices import voices, flags
+from audiblez.calibre_handler import open_book_experimental
 # from audiblez.database import load_all_user_settings, save_user_setting # Now use db. prefix
 
 # Theme definitions
@@ -435,10 +436,6 @@ class MainWindow(wx.Frame):
         open_calibre_button.Bind(wx.EVT_BUTTON, self.on_open_with_calibre)
         top_sizer.Add(open_calibre_button, 0, wx.ALL, 5)
 
-        # Open with Calibre (exp) button
-        open_calibre_exp_button = wx.Button(top_panel, label="🧪 Open with Calibre (exp)")
-        open_calibre_exp_button.Bind(wx.EVT_BUTTON, self.on_open_with_calibre_experimental)
-        top_sizer.Add(open_calibre_exp_button, 0, wx.ALL, 5)
 
         # Open Markdown .md
         # open_md_button = wx.Button(top_panel, label="📁 Open Markdown (.md)")
@@ -2166,133 +2163,6 @@ class MainWindow(wx.Frame):
                 wx.CallAfter(self._load_epub_file, file_path)
 
     def on_open_with_calibre(self, event):
-        from audiblez.core import get_calibre_ebook_convert_path, convert_ebook_with_calibre, extract_chapters_and_metadata_from_calibre_html
-        import tempfile
-        import shutil
-
-        # Define the GUI callback that will be passed to the core function.
-        # This callback is only invoked if the core function cannot find Calibre automatically.
-        def ask_user_for_calibre_path_gui():
-            # First, show an informational dialog.
-            info_message = (
-                "Audiblez needs to know where Calibre is installed to convert this book format.\n\n"
-                "Please locate the 'ebook-convert' program inside your Calibre installation folder.\n\n"
-                "What to look for:\n"
-                "- On Windows, this is often 'C:\\Program Files\\Calibre2\\ebook-convert.exe'.\n"
-                "- On macOS, this is usually in '/Applications/calibre.app/Contents/MacOS/ebook-convert'.\n\n"
-                "The folder containing this file should also have 'calibre-debug'."
-            )
-            dialog = wx.MessageDialog(self, info_message, "Locate Calibre Program", wx.OK | wx.CANCEL | wx.ICON_INFORMATION)
-            response = dialog.ShowModal()
-            dialog.Destroy()
-
-            if response == wx.ID_CANCEL:
-                return None # User cancelled the info dialog
-
-            # If user clicks OK, show the file picker dialog.
-            message = "Select the 'ebook-convert' executable"
-            if platform.system() == "Windows":
-                wildcard = "ebook-convert executable (ebook-convert.exe)|ebook-convert.exe|All files (*.*)|*.*"
-            else:
-                wildcard = "ebook-convert executable (ebook-convert)|ebook-convert|All files (*.*)|*.*"
-
-            with wx.FileDialog(self, message, wildcard=wildcard,
-                               style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST) as fileDialog:
-                if fileDialog.ShowModal() == wx.ID_CANCEL:
-                    return None  # User cancelled
-                
-                # Return the directory containing the selected file, as the core function expects.
-                selected_path = Path(fileDialog.GetPath())
-                return str(selected_path.parent)
-
-        # 1. Check for Calibre's existence first, prompting the user if necessary.
-        # We pass our GUI callback function here.
-        ebook_convert_exe = get_calibre_ebook_convert_path(ui_callback_for_path_selection=ask_user_for_calibre_path_gui)
-
-        # If no path was found (either automatically or by the user), abort.
-        if not ebook_convert_exe:
-            wx.MessageBox("Calibre's 'ebook-convert' tool could not be found. The process has been cancelled.",
-                          "Calibre Not Found", wx.OK | wx.ICON_ERROR)
-            return
-
-        # 2. If Calibre is found, now prompt the user to select an ebook file.
-        wildcard_str = "Ebook files (*.epub;*.mobi;*.azw;*.azw3;*.fb2;*.lit;*.pdf)|*.epub;*.mobi;*.azw;*.azw3;*.fb2;*.lit;*.pdf|All files (*.*)|*.*"
-        with wx.FileDialog(self, "Select Ebook to Convert with Calibre", wildcard=wildcard_str,
-                           style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST) as dialog:
-            if dialog.ShowModal() == wx.ID_CANCEL:
-                return # User cancelled file selection
-            input_ebook_path = dialog.GetPath()
-
-        if not input_ebook_path:
-            return
-
-        if self.synthesis_in_progress:
-            wx.MessageBox("Audiobook synthesis is in progress. Please wait for it to finish.",
-                          "Synthesis Busy", wx.OK | wx.ICON_WARNING)
-            return
-
-        # 3. Proceed with the conversion and UI update logic.
-        temp_html_output_dir = tempfile.mkdtemp(prefix="audiblez_calibre_")
-        print(f"Temporary directory for Calibre HTML output: {temp_html_output_dir}")
-
-        try:
-            wx.BeginBusyCursor()
-            # We already have the path, so we don't need to pass the callback to convert_ebook_with_calibre.
-            # It will call get_calibre_ebook_convert_path again, but it will find it in the DB or PATH now.
-            html_file_path, opf_file_path, cover_image_path = convert_ebook_with_calibre(
-                input_ebook_path,
-                temp_html_output_dir,
-                ui_callback_for_path_selection=None # Path is already found and saved.
-            )
-            wx.EndBusyCursor()
-
-            if not html_file_path:
-                wx.MessageBox(f"Failed to convert '{Path(input_ebook_path).name}' using Calibre. Check console for errors.",
-                              "Calibre Conversion Failed", wx.OK | wx.ICON_ERROR)
-                return
-
-            wx.BeginBusyCursor()
-            extracted_chapters, book_metadata = extract_chapters_and_metadata_from_calibre_html(html_file_path, opf_file_path)
-            wx.EndBusyCursor()
-
-            if not extracted_chapters:
-                title_from_meta = book_metadata.get('title', Path(input_ebook_path).stem)
-                wx.MessageBox(f"Could not extract chapters from the HTML output of '{title_from_meta}'. The book might be empty or in an unexpected format.",
-                              "Chapter Extraction Failed", wx.OK | wx.ICON_WARNING)
-
-            # Store calibre-specific data that might be used by other functions
-            self.book_data = {
-                'cover_image_path': cover_image_path,
-                'metadata': book_metadata
-            }
-            
-            cover_info = {'type': 'path', 'content': cover_image_path} if cover_image_path else None
-
-            self._load_book_data_into_ui(
-                book_title=book_metadata.get('title', Path(input_ebook_path).stem),
-                book_author=book_metadata.get('creator', "Unknown Author"),
-                document_chapters=extracted_chapters,
-                source_path=input_ebook_path,
-                book_object=None, # No epub object for calibre
-                cover_info=cover_info
-            )
-
-            if extracted_chapters:
-                wx.MessageBox(f"Successfully processed '{self.selected_book_title}' using Calibre.",
-                              "Processing Complete", wx.OK | wx.ICON_INFORMATION)
-
-        finally:
-            if Path(temp_html_output_dir).exists():
-                try:
-                    shutil.rmtree(temp_html_output_dir)
-                    print(f"Cleaned up temporary directory: {temp_html_output_dir}")
-                except Exception as e:
-                    print(f"Error cleaning up temporary directory {temp_html_output_dir}: {e}")
-            if wx.IsBusy():
-                wx.EndBusyCursor()
-
-    def on_open_with_calibre_experimental(self, event):
-        from audiblez.new_parser import open_book_experimental
         from types import SimpleNamespace
         
         wildcard_str = "Ebook files (*.epub;*.mobi;*.azw;*.azw3;*.fb2;*.lit;*.pdf)|*.epub;*.mobi;*.azw;*.azw3;*.fb2;*.lit;*.pdf|All files (*.*)|*.*"
