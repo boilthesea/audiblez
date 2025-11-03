@@ -171,6 +171,9 @@ def open_book_experimental(file_path, ui_callback_for_path_selection):
                         ebook_convert_exe = get_calibre_ebook_convert_path(ui_callback_for_path_selection)
                         if ebook_convert_exe:
                             command = [ebook_convert_exe, file_path, temp_cover_path]
+                            import pprint
+                            print("subprocess.run environment:")
+                            pprint.pprint(dict(os.environ))
                             subprocess.run(command, check=True, capture_output=True, text=True)
                             if os.path.exists(temp_cover_path):
                                 # The cover is already at temp_cover_path, so just use it.

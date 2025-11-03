@@ -139,3 +139,15 @@ U.S.|United States
 U.K.|United Kingdom
 U.S.A.|United States of America
 E.U.|European Union
+
+
+# Wildcard Examples
+# The wildcard * can be used for partial word matching.
+# For example, 'word*' will match 'word', 'words', 'wording', etc.
+# '*word' will match 'word', 'keyword', 'password', etc.
+# '*word*' will match 'word', 'keyword', 'wording', 'password', etc.
+#
+# Remove asterisks from text
+# **|
+# Remove chapter markers
+# Chapter*|

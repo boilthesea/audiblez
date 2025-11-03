@@ -638,9 +638,18 @@ def apply_filters(text: str, filter_file_path: str = "audiblez/filter.txt") -> s
         text_changed_overall = False
         for rule_item in rules:  # Changed 'rule' to 'rule_item' to avoid conflict if 'rule' is a var name
             for pattern in rule_item['patterns']:
-                # Use negative lookarounds to ensure we match whole words/abbreviations only.
-                # This prevents matching a filter pattern inside another word (e.g. "rd." in "word.").
-                regex_pattern = r'(?<!\w)' + re.escape(pattern) + r'(?!\w)'
+                if "*" in pattern:
+                    # Wildcard matching: convert glob-style wildcard to regex
+                    # 'word*' -> 'word\w*'
+                    # '*word' -> '\w*word'
+                    # '*word*' -> '\w*word\w*'
+                    regex_pattern = re.escape(pattern).replace(r'\*', r'\w*')
+                else:
+                    # Exact word matching for patterns without wildcards
+                    # Use negative lookarounds to ensure we match whole words/abbreviations only.
+                    # This prevents matching a filter pattern inside another word (e.g. "rd." in "word.").
+                    regex_pattern = r'(?<!\w)' + re.escape(pattern) + r'(?!\w)'
+
                 new_text, count = re.subn(regex_pattern, rule_item['replacement'], text, flags=re.IGNORECASE)
                 if count > 0:
                     # Corrected f-string and variable names
