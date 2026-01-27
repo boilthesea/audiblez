@@ -55,179 +55,203 @@ def convert_html_to_text(html_path, ui_callback_for_path_selection):
         if os.path.exists(temp_txt_path):
             os.remove(temp_txt_path)
 
-def open_book_experimental(file_path, ui_callback_for_path_selection):
+def open_book_experimental(file_path, ui_callback_for_path_selection, method=None):
     """
     Experimental function to open an ebook, with multiple fallbacks for TOC extraction.
+    If 'method' (1, 2, or 3) is provided, only that method is attempted.
     """
-    print("Attempting to open book with experimental method...")
+    print(f"Attempting to open book with experimental method (method override: {method})...")
 
     # Method 1: Try ebooklib directly
-    try:
-        print("Parser: Attempting to use ebooklib directly.")
-        book = epub.read_epub(file_path)
-        toc = book.toc
-        if toc:
-            print("Parser: Successfully extracted TOC with ebooklib.")
-            chapters = []
-            for link in book.toc:
-                if isinstance(link, epub.Link):
-                    item = book.get_item_with_href(link.href)
-                    chapters.append({'title': link.title, 'src': item.file_name})
-                elif isinstance(link, tuple) and len(link) > 1 and hasattr(link[0], 'title') and hasattr(link[0], 'href'):
-                    # Handle nested chapters, which ebooklib returns as tuples
-                    item = book.get_item_with_href(link[0].href)
-                    chapters.append({'title': link[0].title, 'src': item.file_name})
-            
-            # Find the opf file directory
-            rootfile_path = book.opf_file
-            opf_dir = os.path.dirname(rootfile_path)
-
-            chapters_with_text = extract_chapters_with_calibre(chapters, file_path, opf_dir, ui_callback_for_path_selection)
-            
-            from audiblez.core import find_cover
-            cover = find_cover(book)
-            cover_info = None
-            if cover and cover.content:
-                with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as temp_cover_file:
-                    temp_cover_file.write(cover.content)
-                    cover_info = {'type': 'path', 'content': temp_cover_file.name}
-
-            return "TOC extracted with ebooklib", chapters_with_text, book.metadata, cover_info
-    except Exception as e:
-        print(f"Parser: ebooklib failed to open the book. Reason: {e}")
-
-    # Method 2: Fallback to zip file extraction
-    try:
-        print("Parser: Attempting to extract TOC from zip archive.")
-        with zipfile.ZipFile(file_path, 'r') as z:
-            if 'META-INF/container.xml' in z.namelist():
-                # Find the rootfile path from container.xml
-                container = z.read('META-INF/container.xml')
-                root = ET.fromstring(container)
-                rootfile_path = root.find('.//{urn:oasis:names:tc:opendocument:xmlns:container}rootfile').attrib['full-path']
+    if method is None or method == 1:
+        try:
+            print("Parser: Attempting to use ebooklib directly.")
+            book = epub.read_epub(file_path)
+            toc = book.toc
+            if toc:
+                print("Parser: Successfully extracted TOC with ebooklib.")
+                chapters = []
+                for link in book.toc:
+                    if isinstance(link, epub.Link):
+                        item = book.get_item_with_href(link.href)
+                        chapters.append({'title': link.title, 'src': item.file_name})
+                    elif isinstance(link, tuple) and len(link) > 1 and hasattr(link[0], 'title') and hasattr(link[0], 'href'):
+                        # Handle nested chapters, which ebooklib returns as tuples
+                        item = book.get_item_with_href(link[0].href)
+                        chapters.append({'title': link[0].title, 'src': item.file_name})
                 
-                # Get the directory of the rootfile, which is needed to resolve relative paths in the OPF
+                # Find the opf file directory
+                rootfile_path = book.opf_file
                 opf_dir = os.path.dirname(rootfile_path)
 
-                # Read the rootfile to find the TOC and metadata
-                rootfile_content = z.read(rootfile_path)
-                root = ET.fromstring(rootfile_content)
+                chapters_with_text = extract_chapters_with_calibre(chapters, file_path, opf_dir, ui_callback_for_path_selection)
                 
-                # --- Metadata Extraction from OPF ---
-                metadata = {}
-                for meta_element in root.findall('.//{http://purl.org/dc/elements/1.1/}title'):
-                    metadata['title'] = [meta_element.text]
-                for meta_element in root.findall('.//{http://purl.org/dc/elements/1.1/}creator'):
-                    metadata['creator'] = [meta_element.text]
-
-                # --- Cover Extraction from OPF ---
+                from audiblez.core import find_cover
+                cover = find_cover(book)
                 cover_info = None
-                # Strategy 1: Look for <meta name="cover">
-                meta_cover = root.find('.//meta[@name="cover"]')
-                if meta_cover is not None:
-                    cover_id = meta_cover.attrib['content']
-                    cover_href_tag = root.find(f'.//*[@id="{cover_id}"]')
-                    if cover_href_tag is not None:
-                        cover_href = cover_href_tag.attrib['href']
-                        cover_path = os.path.join(opf_dir, cover_href).replace('\\', '/')
-                        if cover_path in z.namelist():
-                            cover_content = z.read(cover_path)
-                            with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as temp_cover_file:
-                                temp_cover_file.write(cover_content)
-                                cover_info = {'type': 'path', 'content': temp_cover_file.name}
+                if cover and cover.content:
+                    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as temp_cover_file:
+                        temp_cover_file.write(cover.content)
+                        cover_info = {'type': 'path', 'content': temp_cover_file.name}
 
-                # Strategy 2: Look for item with id="cover"
-                if not cover_info:
-                    cover_item = root.find('.//*[@id="cover"]')
-                    if cover_item is not None:
-                        cover_href = cover_item.attrib['href']
-                        cover_path = os.path.join(opf_dir, cover_href).replace('\\', '/')
-                        if cover_path in z.namelist():
-                            cover_content = z.read(cover_path)
-                            with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as temp_cover_file:
-                                temp_cover_file.write(cover_content)
-                                cover_info = {'type': 'path', 'content': temp_cover_file.name}
+                return 1, "TOC extracted with ebooklib", chapters_with_text, book.metadata, cover_info
+        except Exception as e:
+            print(f"Parser: ebooklib failed to open the book. Reason: {e}")
+            if method == 1:
+                return 1, f"Method 1 failed: {e}", None, None, None
 
-                # Strategy 3: Look for item with "cover" in the href
-                if not cover_info:
-                    for item in root.findall('.//opf:item', namespaces={'opf': 'http://www.idpf.org/2007/opf'}):
-                        if 'cover' in item.attrib.get('href', '').lower() and item.attrib.get('media-type', '').startswith('image'):
-                            cover_href = item.attrib['href']
+    # Method 2: Fallback to zip file extraction
+    if method is None or method == 2:
+        try:
+            print("Parser: Attempting to extract TOC from zip archive.")
+            with zipfile.ZipFile(file_path, 'r') as z:
+                if 'META-INF/container.xml' in z.namelist():
+                    # Find the rootfile path from container.xml
+                    container = z.read('META-INF/container.xml')
+                    root = ET.fromstring(container)
+                    rootfile_path = root.find('.//{urn:oasis:names:tc:opendocument:xmlns:container}rootfile').attrib['full-path']
+                    
+                    # Get the directory of the rootfile, which is needed to resolve relative paths in the OPF
+                    opf_dir = os.path.dirname(rootfile_path)
+
+                    # Read the rootfile to find the TOC and metadata
+                    rootfile_content = z.read(rootfile_path)
+                    root = ET.fromstring(rootfile_content)
+                    
+                    # --- Metadata Extraction from OPF ---
+                    metadata = {}
+                    for meta_element in root.findall('.//{http://purl.org/dc/elements/1.1/}title'):
+                        metadata['title'] = [meta_element.text]
+                    for meta_element in root.findall('.//{http://purl.org/dc/elements/1.1/}creator'):
+                        metadata['creator'] = [meta_element.text]
+
+                    # --- Cover Extraction from OPF ---
+                    cover_info = None
+                    # Strategy 1: Look for <meta name="cover">
+                    meta_cover = root.find('.//meta[@name="cover"]')
+                    if meta_cover is not None:
+                        cover_id = meta_cover.attrib['content']
+                        cover_href_tag = root.find(f'.//*[@id="{cover_id}"]')
+                        if cover_href_tag is not None:
+                            cover_href = cover_href_tag.attrib['href']
                             cover_path = os.path.join(opf_dir, cover_href).replace('\\', '/')
                             if cover_path in z.namelist():
                                 cover_content = z.read(cover_path)
                                 with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as temp_cover_file:
                                     temp_cover_file.write(cover_content)
                                     cover_info = {'type': 'path', 'content': temp_cover_file.name}
-                                break
 
-                # Strategy 4: Use Calibre to extract the cover
-                if not cover_info:
-                    print("Parser: Falling back to Calibre to extract cover.")
-                    try:
-                        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as temp_cover_file:
-                            temp_cover_path = temp_cover_file.name
-                        
-                        ebook_convert_exe = get_calibre_ebook_convert_path(ui_callback_for_path_selection)
-                        if ebook_convert_exe:
-                            command = [ebook_convert_exe, file_path, temp_cover_path]
-                            import pprint
-                            print("subprocess.run environment:")
-                            pprint.pprint(dict(os.environ))
-                            subprocess.run(command, check=True, capture_output=True, text=True)
-                            if os.path.exists(temp_cover_path):
-                                # The cover is already at temp_cover_path, so just use it.
-                                cover_info = {'type': 'path', 'content': temp_cover_path}
-                    except Exception as e:
-                        print(f"Parser: Calibre cover extraction failed: {e}")
+                    # Strategy 2: Look for item with id="cover"
+                    if not cover_info:
+                        cover_item = root.find('.//*[@id="cover"]')
+                        if cover_item is not None:
+                            cover_href = cover_item.attrib['href']
+                            cover_path = os.path.join(opf_dir, cover_href).replace('\\', '/')
+                            if cover_path in z.namelist():
+                                cover_content = z.read(cover_path)
+                                with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as temp_cover_file:
+                                    temp_cover_file.write(cover_content)
+                                    cover_info = {'type': 'path', 'content': temp_cover_file.name}
 
-                # Find the toc.ncx file path
-                toc_id_element = root.find('.//*[@media-type="application/x-dtbncx+xml"]')
-                if toc_id_element is not None:
-                    toc_id = toc_id_element.attrib['id']
-                    toc_href_element = root.find(f'.//*[@id="{toc_id}"]')
-                    if toc_href_element is not None:
-                        toc_href = toc_href_element.attrib['href']
-                        toc_path = os.path.join(opf_dir, toc_href).replace('\\', '/')
+                    # Strategy 3: Look for item with "cover" in the href
+                    if not cover_info:
+                        for item in root.findall('.//opf:item', namespaces={'opf': 'http://www.idpf.org/2007/opf'}):
+                            if 'cover' in item.attrib.get('href', '').lower() and item.attrib.get('media-type', '').startswith('image'):
+                                cover_href = item.attrib['href']
+                                cover_path = os.path.join(opf_dir, cover_href).replace('\\', '/')
+                                if cover_path in z.namelist():
+                                    cover_content = z.read(cover_path)
+                                    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as temp_cover_file:
+                                        temp_cover_file.write(cover_content)
+                                        cover_info = {'type': 'path', 'content': temp_cover_file.name}
+                                    break
+
+                    # Strategy 4: Use Calibre to extract the cover
+                    if not cover_info:
+                        print("Parser: Falling back to Calibre to extract cover.")
+                        try:
+                            with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as temp_cover_file:
+                                temp_cover_path = temp_cover_file.name
+                            
+                            ebook_convert_exe = get_calibre_ebook_convert_path(ui_callback_for_path_selection)
+                            if ebook_convert_exe:
+                                command = [ebook_convert_exe, file_path, temp_cover_path]
+                                # import pprint
+                                # print("subprocess.run environment:")
+                                # pprint.pprint(dict(os.environ))
+                                subprocess.run(command, check=True, capture_output=True, text=True)
+                                if os.path.exists(temp_cover_path):
+                                    # The cover is already at temp_cover_path, so just use it.
+                                    cover_info = {'type': 'path', 'content': temp_cover_path}
+                        except Exception as e:
+                            print(f"Parser: Calibre cover extraction failed: {e}")
+
+                    # Find the toc.ncx file path
+                    toc_id_element = root.find('.//*[@media-type="application/x-dtbncx+xml"]')
+                    if toc_id_element is not None:
+                        toc_id = toc_id_element.attrib['id']
+                        toc_href_element = root.find(f'.//*[@id="{toc_id}"]')
+                        if toc_href_element is not None:
+                            toc_href = toc_href_element.attrib['href']
+                            toc_path = os.path.join(opf_dir, toc_href).replace('\\', '/')
+                        else:
+                            # Handle case where toc href is not found
+                            print("Parser: Could not find toc href element.")
+                            toc_path = None
                     else:
-                        # Handle case where toc href is not found
-                        print("Parser: Could not find toc href element.")
+                        # Handle case where toc id is not found
+                        print("Parser: Could not find toc id element.")
                         toc_path = None
-                else:
-                    # Handle case where toc id is not found
-                    print("Parser: Could not find toc id element.")
-                    toc_path = None
-                
-                # Extract and parse the toc.ncx
-                toc_content = z.read(toc_path)
-                toc_root = ET.fromstring(toc_content)
-                
-                chapters = []
-                for nav_point in toc_root.findall('.//{http://www.daisy.org/z3986/2005/ncx/}navPoint'):
-                    title = nav_point.find('.//{http://www.daisy.org/z3986/2005/ncx/}text').text
-                    src_parts = nav_point.find('.//{http://www.daisy.org/z3986/2005/ncx/}content').attrib['src'].split('#')
-                    src = src_parts[0]
-                    chapters.append({'title': title, 'src': src})
-                
-                print("Parser: Successfully extracted and parsed toc.ncx from zip.")
-                chapters_with_text = extract_chapters_with_calibre(chapters, file_path, opf_dir, ui_callback_for_path_selection)
-                return "TOC extracted from zip", chapters_with_text, metadata, cover_info
+                    
+                    # Extract and parse the toc.ncx
+                    if toc_path and toc_path in z.namelist():
+                        toc_content = z.read(toc_path)
+                        toc_root = ET.fromstring(toc_content)
+                        
+                        chapters = []
+                        for nav_point in toc_root.findall('.//{http://www.daisy.org/z3986/2005/ncx/}navPoint'):
+                            title = nav_point.find('.//{http://www.daisy.org/z3986/2005/ncx/}text').text
+                            src_parts = nav_point.find('.//{http://www.daisy.org/z3986/2005/ncx/}content').attrib['src'].split('#')
+                            src = src_parts[0]
+                            chapters.append({'title': title, 'src': src})
+                        
+                        print("Parser: Successfully extracted and parsed toc.ncx from zip.")
+                        chapters_with_text = extract_chapters_with_calibre(chapters, file_path, opf_dir, ui_callback_for_path_selection)
+                        return 2, "TOC extracted from zip", chapters_with_text, metadata, cover_info
+                    else:
+                        print(f"Parser: toc.ncx not found at {toc_path} or missing in zip.")
 
-    except Exception as e:
-        print(f"Parser: Failed to extract TOC from zip. Reason: {e}")
+        except Exception as e:
+            print(f"Parser: Failed to extract TOC from zip. Reason: {e}")
+            if method == 2:
+                return 2, f"Method 2 failed: {e}", None, None, None
 
     # Method 3: Fallback to original Calibre method
-    print("Parser: Falling back to Calibre-only method.")
-    html_file_path, opf_file_path, cover_image_path = convert_ebook_with_calibre(
-        file_path, 
-        ui_callback_for_path_selection=ui_callback_for_path_selection
-    )
-    if html_file_path:
-        chapters, metadata = extract_chapters_and_metadata_from_calibre_html(html_file_path, opf_file_path)
-        cover_info = {'type': 'path', 'content': cover_image_path} if cover_image_path else None
-        return "Chapters extracted with Calibre", chapters, metadata, cover_info
+    if method is None or method == 3:
+        print("Parser: Attempting Calibre-only method (Method 3).")
+        try:
+            # Create a temporary directory for Calibre output
+            output_html_dir = tempfile.mkdtemp()
+            html_file_path, opf_file_path, cover_image_path = convert_ebook_with_calibre(
+                file_path, 
+                output_html_dir,
+                ui_callback_for_path_selection=ui_callback_for_path_selection
+            )
+            if html_file_path:
+                chapters, metadata = extract_chapters_and_metadata_from_calibre_html(html_file_path, opf_file_path)
+                cover_info = {'type': 'path', 'content': cover_image_path} if cover_image_path else None
+                # We should probably return a cleanup function or handle it later. 
+                # For now, it's consistent with others.
+                return 3, "Chapters extracted with Calibre", chapters, metadata, cover_info
+            else:
+                print("Parser: Calibre conversion failed to produce HTML.")
+        except Exception as e:
+            print(f"Parser: Calibre-only method failed. Reason: {e}")
+            if method == 3:
+                return 3, f"Method 3 failed: {e}", None, None, None
     
-    return "Failed to open book", None, None, None
+    return None, "Failed to open book with any experimental parser", None, None, None
+
 
 
 def get_calibre_ebook_convert_path(ui_callback_for_path_selection=None) -> str | None:

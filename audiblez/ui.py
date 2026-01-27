@@ -161,6 +161,9 @@ class MainWindow(wx.Frame):
         self.selected_chapter = None
         self.selected_book = None
         self.synthesis_in_progress = False
+        self.parsing_methods_available = ["Ebooklib", "Zip Extraction", "Calibre Only"]
+        self.parsing_results = {} # Store results per method index
+        self.current_parsing_method = 1 # Default to method 1
 
         self.Bind(EVENTS['CORE_STARTED'][1], self.on_core_started)
         self.Bind(EVENTS['CORE_CHAPTER_STARTED'][1], self.on_core_chapter_started)
@@ -561,7 +564,7 @@ class MainWindow(wx.Frame):
                 elif isinstance(child, wx.TextCtrl):
                     child.SetBackgroundColour(theme['panel'])
                     child.SetForegroundColour(theme['text'])
-                elif isinstance(child, GenCheckBox):
+                elif isinstance(child, (wx.RadioButton, GenCheckBox)):
                     child.SetBackgroundColour(theme['background'])
                     child.SetForegroundColour(theme['text'])
                 elif isinstance(child, wx.ComboCtrl):
@@ -1002,8 +1005,34 @@ class MainWindow(wx.Frame):
         # 1. Populate the "Chapters" tab
         for child in self.chapters_tab_page.GetChildren():
             child.Destroy()
-        self.chapters_panel = self.create_chapters_table_panel(self.document_chapters)
+        
         chapters_page_sizer = wx.BoxSizer(wx.VERTICAL)
+        
+        # Add Parsing Method selector
+        method_sizer = wx.BoxSizer(wx.HORIZONTAL)
+        method_label = wx.StaticText(self.chapters_tab_page, label="Parsing Method:")
+        method_label.SetForegroundColour(theme['text'])
+        method_sizer.Add(method_label, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALL, 5)
+        
+        self.method_buttons = []
+        for i, choice in enumerate(self.parsing_methods_available):
+            btn_style = wx.RB_GROUP if i == 0 else 0
+            btn = wx.RadioButton(self.chapters_tab_page, label=choice, style=btn_style)
+            btn.SetForegroundColour(theme['text'])
+            btn.SetValue(self.current_parsing_method == i + 1)
+            btn.Bind(wx.EVT_RADIOBUTTON, self.on_change_parsing_method)
+            
+            # Disable methods that failed (if we have that info)
+            method_idx = i + 1
+            if method_idx in self.parsing_results and self.parsing_results[method_idx]['chapters'] is None:
+                btn.Enable(False)
+            
+            method_sizer.Add(btn, 0, wx.ALIGN_CENTER_VERTICAL | wx.LEFT | wx.RIGHT, 10)
+            self.method_buttons.append(btn)
+
+        chapters_page_sizer.Add(method_sizer, 0, wx.EXPAND | wx.ALL, 5)
+
+        self.chapters_panel = self.create_chapters_table_panel(self.document_chapters)
         chapters_page_sizer.Add(self.chapters_panel, 1, wx.EXPAND | wx.ALL)
         self.chapters_tab_page.SetSizer(chapters_page_sizer)
         self.chapters_tab_page.Layout()
@@ -2172,28 +2201,10 @@ class MainWindow(wx.Frame):
                 return
             input_ebook_path = dialog.GetPath()
 
-        def ask_user_for_calibre_path_gui():
-            info_message = (
-                "Audiblez needs to know where Calibre is installed to convert this book format.\n\n"
-                "Please locate the 'ebook-convert' program inside your Calibre installation folder.\n\n"
-                "More specifically, find the directory containing both 'ebook-convert' and 'calibre-debug'.\n\n"
-                "- On Windows, this is often 'C:\\Program Files\\Calibre2\\'.\n"
-                "- On macOS, this is usually in '/Applications/calibre.app/Contents/MacOS/'.\n\n"
-                "The folder containing this file should also have 'calibre-debug'."
-            )
-            dialog = wx.MessageDialog(self, info_message, "Locate Calibre Program", wx.OK | wx.CANCEL | wx.ICON_INFORMATION)
-            if dialog.ShowModal() == wx.ID_OK:
-                dir_dialog = wx.DirDialog(self, "Choose Calibre Directory", style=wx.DD_DEFAULT_STYLE)
-                if dir_dialog.ShowModal() == wx.ID_OK:
-                    return dir_dialog.GetPath()
-                dir_dialog.Destroy()
-            dialog.Destroy()
-            return None
-
-        result, chapters, metadata, cover_info = open_book_experimental(input_ebook_path, ask_user_for_calibre_path_gui)
+        result, result_desc, chapters, metadata, cover_info = open_book_experimental(input_ebook_path, self._ask_user_for_calibre_path_generic)
         
         if not chapters:
-            wx.MessageBox(f"Failed to open book with experimental parser: {result}", "Error", wx.OK | wx.ICON_ERROR)
+            wx.MessageBox(f"Failed to open book with experimental parser: {result_desc}", "Error", wx.OK | wx.ICON_ERROR)
             return
 
         document_chapters = []
@@ -2223,6 +2234,16 @@ class MainWindow(wx.Frame):
             'metadata': metadata
         }
 
+        # Clear and initialize parsing results for this new book
+        self.parsing_results = {}
+        self.current_parsing_method = result # The method that actually worked
+        self.parsing_results[result] = {
+            'chapters': chapters, # These are the raw chapter dicts from calibre_handler
+            'metadata': metadata,
+            'cover_info': cover_info,
+            'document_chapters': document_chapters # These are the SimpleNamespace objects for UI
+        }
+
         wx.CallAfter(self._load_book_data_into_ui,
             book_title=book_title,
             book_author=book_author,
@@ -2232,7 +2253,128 @@ class MainWindow(wx.Frame):
             cover_info=cover_info
         )
 
-        wx.MessageBox(f"Successfully opened book with experimental parser. Method: {result}", "Success", wx.OK | wx.ICON_INFORMATION)
+        wx.MessageBox(f"Successfully opened book with experimental parser. Method: {self.parsing_methods_available[result-1]}", "Success", wx.OK | wx.ICON_INFORMATION)
+
+    def on_change_parsing_method(self, event):
+        btn = event.GetEventObject()
+        new_method_idx = self.method_buttons.index(btn) + 1
+        if new_method_idx == self.current_parsing_method:
+            return
+
+        # Check if we already have results for this method
+        if new_method_idx in self.parsing_results:
+            self._apply_parsing_result(new_method_idx)
+        else:
+            # Run the parsing method
+            self._run_parsing_method(new_method_idx)
+
+    def _run_parsing_method(self, method_idx):
+        from types import SimpleNamespace
+        # Show busy cursor
+        wx.BeginBusyCursor()
+        try:
+            def ask_user_for_calibre_path_gui():
+                # This is already defined in on_open_with_calibre, 
+                # but we need it here too. For now let's reuse it or move it.
+                # Actually, get_calibre_ebook_convert_path will handle it if we pass the callback.
+                pass 
+            
+            # Use a dummy callback for now if we don't want to re-prompt
+            # OR better, use the one from the main window.
+            
+            result_idx, result_desc, chapters, metadata, cover_info = open_book_experimental(
+                self.selected_file_path, 
+                self._ask_user_for_calibre_path_generic, # Need to define this
+                method=method_idx
+            )
+
+            if not chapters:
+                wx.EndBusyCursor()
+                wx.MessageBox(f"Method {method_idx} ({self.parsing_methods_available[method_idx-1]}) failed to extract chapters.", "Parsing Failed", wx.OK | wx.ICON_ERROR)
+                self.parsing_results[method_idx] = {'chapters': None}
+                btn = self.method_buttons[method_idx - 1]
+                btn.Enable(False)
+                # Re-select the working method
+                self.method_buttons[self.current_parsing_method - 1].SetValue(True)
+                return
+
+            document_chapters = []
+            for i, chapter_data in enumerate(chapters):
+                chapter_obj = SimpleNamespace()
+                chapter_obj.title = chapter_data.get('title', f"Chapter {i+1}")
+                chapter_obj.short_name = chapter_obj.title
+                chapter_obj.extracted_text = chapter_data.get('extracted_text', '')
+                chapter_obj.is_selected = True
+                chapter_obj.chapter_index = i
+                chapter_obj.get_name = lambda: chapter_obj.title
+                chapter_obj.get_type = lambda: "experimental_chapter"
+                document_chapters.append(chapter_obj)
+
+            self.parsing_results[method_idx] = {
+                'chapters': chapters,
+                'metadata': metadata,
+                'cover_info': cover_info,
+                'document_chapters': document_chapters
+            }
+            
+            self._apply_parsing_result(method_idx)
+            wx.EndBusyCursor()
+            wx.MessageBox(f"Successfully switched to {self.parsing_methods_available[method_idx-1]}.", "Success", wx.OK | wx.ICON_INFORMATION)
+
+        except Exception as e:
+            wx.EndBusyCursor()
+            wx.MessageBox(f"An error occurred during parsing: {e}", "Error", wx.OK | wx.ICON_ERROR)
+            self.method_buttons[self.current_parsing_method - 1].SetValue(True)
+
+    def _apply_parsing_result(self, method_idx):
+        result = self.parsing_results[method_idx]
+        self.current_parsing_method = method_idx
+        
+        book_title = "Unknown Title"
+        book_author = "Unknown Author"
+        metadata = result['metadata']
+        if isinstance(metadata, dict):
+            book_title = metadata.get('title', ["Unknown Title"])[0]
+            book_author = metadata.get('creator', ["Unknown Author"])[0]
+        elif hasattr(metadata, 'get'):
+            book_title = metadata.get('title', [("Unknown Title", {})])[0][0]
+            book_author = metadata.get('creator', [("Unknown Author", {})])[0][0]
+
+        self.book_data['metadata'] = metadata
+        # cover_info might have changed, but usually we keep the first one that worked?
+        # Actually, let's update it if the new method has one.
+        if result['cover_info']:
+             self.book_data['cover_image_path'] = result['cover_info']['content']
+
+        self._load_book_data_into_ui(
+            book_title=book_title,
+            book_author=book_author,
+            document_chapters=result['document_chapters'],
+            source_path=self.selected_file_path,
+            book_object=None,
+            cover_info=result['cover_info']
+        )
+
+    def _ask_user_for_calibre_path_generic(self):
+        info_message = (
+            "Audiblez needs to know where Calibre is installed to convert this book format.\n\n"
+            "Please locate the 'ebook-convert' program inside your Calibre installation folder.\n\n"
+            "More specifically, find the directory containing both 'ebook-convert' and 'calibre-debug'.\n\n"
+            "- On Windows, this is often 'C:\\Program Files\\Calibre2\\'.\n"
+            "- On macOS, this is usually in '/Applications/calibre.app/Contents/MacOS/'.\n\n"
+            "The folder containing this file should also have 'calibre-debug'."
+        )
+        dialog = wx.MessageDialog(self, info_message, "Locate Calibre Program", wx.OK | wx.CANCEL | wx.ICON_INFORMATION)
+        if dialog.ShowModal() == wx.ID_OK:
+            dir_dialog = wx.DirDialog(self, "Choose Calibre Directory", style=wx.DD_DEFAULT_STYLE)
+            if dir_dialog.ShowModal() == wx.ID_OK:
+                path = dir_dialog.GetPath()
+                dir_dialog.Destroy()
+                dialog.Destroy()
+                return path
+            dir_dialog.Destroy()
+        dialog.Destroy()
+        return None
 
 
     def on_exit(self, event):
