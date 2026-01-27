@@ -526,7 +526,25 @@ def create_m4b(chapter_files: list[str], original_input_filename: str, cover_ima
         ])
 
         print(f"Executing ffmpeg command in '{output_folder}': {' '.join(ffmpeg_command)}")
-        proc = subprocess.run(ffmpeg_command, cwd=output_folder, capture_output=True, text=True, check=True)
+        try:
+            proc = subprocess.run(ffmpeg_command, cwd=output_folder, capture_output=True, text=True, check=True)
+        except subprocess.CalledProcessError as e:
+            if cover_image:
+                print(f"Warning: M4B assembly with cover image failed. Retrying without cover. Reason: {e}")
+                print(f"ffmpeg stderr:\n{e.stderr}")
+                # Re-construct command without cover
+                ffmpeg_command_no_cover = [
+                    'ffmpeg', '-y',
+                    '-i', str(concat_file_path.relative_to(output_path).as_posix()),
+                    '-i', str(chapters_txt_path.relative_to(output_path).as_posix()),
+                    '-map', '0:a', '-map_metadata', '1',
+                    '-c:a', 'aac', '-b:a', '64k', '-f', 'mp4',
+                    str(temp_m4b_filepath.relative_to(output_path).as_posix())
+                ]
+                print(f"Executing ffmpeg command (no cover) in '{output_folder}': {' '.join(ffmpeg_command_no_cover)}")
+                proc = subprocess.run(ffmpeg_command_no_cover, cwd=output_folder, capture_output=True, text=True, check=True)
+            else:
+                raise
 
         if temp_m4b_filepath.exists():
             if final_filename.exists():

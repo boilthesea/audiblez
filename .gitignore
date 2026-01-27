@@ -13,3 +13,4 @@ chapters.txt
 dist
 .venv
 *.gi.*
+gi/
