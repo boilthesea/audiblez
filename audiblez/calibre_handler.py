@@ -67,36 +67,96 @@ def open_book_experimental(file_path, ui_callback_for_path_selection, method=Non
         try:
             print("Parser: Attempting to use ebooklib directly.")
             book = epub.read_epub(file_path)
-            toc = book.toc
-            if toc:
-                print("Parser: Successfully extracted TOC with ebooklib.")
-                chapters = []
-                for link in book.toc:
+            
+            # Robust opf_dir detection from container.xml
+            current_opf_dir = ""
+            try:
+                with zipfile.ZipFile(file_path, 'r') as z:
+                    if 'META-INF/container.xml' in z.namelist():
+                        container = z.read('META-INF/container.xml')
+                        container_root = ET.fromstring(container)
+                        rootfile_path = container_root.find('.//{urn:oasis:names:tc:opendocument:xmlns:container}rootfile').attrib['full-path']
+                        current_opf_dir = os.path.dirname(rootfile_path)
+                        print(f"Parser: Detected opf_dir: '{current_opf_dir}'")
+            except Exception as e_opf:
+                print(f"Parser: Warning: Could not detect opf_dir from container.xml: {e_opf}")
+
+            def flatten_toc(toc_list):
+                flat = []
+                for link in toc_list:
                     if isinstance(link, epub.Link):
-                        item = book.get_item_with_href(link.href)
-                        chapters.append({'title': link.title, 'src': item.file_name})
-                    elif isinstance(link, tuple) and len(link) > 1 and hasattr(link[0], 'title') and hasattr(link[0], 'href'):
-                        # Handle nested chapters, which ebooklib returns as tuples
-                        item = book.get_item_with_href(link[0].href)
-                        chapters.append({'title': link[0].title, 'src': item.file_name})
-                
-                # Find the opf file directory
-                rootfile_path = book.opf_file
-                opf_dir = os.path.dirname(rootfile_path)
+                        href = link.href.split('#')[0]
+                        item = book.get_item_with_href(href)
+                        if item:
+                            # ebooklib items often have paths relative to the OPF file.
+                            # extract_chapters_with_calibre expects 'src' relative to opf_dir.
+                            # item.file_name is the full path in the zip.
+                            # So we strip the opf_dir from its beginning if it exists.
+                            src = item.file_name
+                            if current_opf_dir and src.startswith(current_opf_dir + '/'):
+                                src = src[len(current_opf_dir) + 1:]
+                            elif current_opf_dir and src.startswith(current_opf_dir + '\\'):
+                                src = src[len(current_opf_dir) + 1:]
+                                
+                            flat.append({'title': link.title, 'src': src})
+                    elif isinstance(link, tuple) and len(link) > 1:
+                        # Handle nested chapters
+                        if isinstance(link[0], epub.Link):
+                            flat.extend(flatten_toc([link[0]]))
+                        elif hasattr(link[0], 'title'):
+                            # It's likely a Section, we'll skip adding the section itself
+                            # as a chapter if it has no href, but process its children.
+                            pass
+                        flat.extend(flatten_toc(link[1]))
+                return flat
 
-                chapters_with_text = extract_chapters_with_calibre(chapters, file_path, opf_dir, ui_callback_for_path_selection)
+            chapters = []
+            if book.toc:
+                print("Parser: Successfully extracted TOC with ebooklib.")
+                chapters = flatten_toc(book.toc)
+            
+            # Fallback: If no chapters found via TOC, look for documents sequentially (like core.py)
+            if not chapters:
+                print("Parser: TOC empty or failed. Falling back to sequential document extraction.")
+                from audiblez.core import is_chapter, find_document_chapters_and_extract_texts
+                all_docs = find_document_chapters_and_extract_texts(book)
+                for doc in all_docs:
+                    if is_chapter(doc):
+                        src = doc.file_name
+                        if current_opf_dir and src.startswith(current_opf_dir + '/'):
+                            src = src[len(current_opf_dir) + 1:]
+                        elif current_opf_dir and src.startswith(current_opf_dir + '\\'):
+                            src = src[len(current_opf_dir) + 1:]
+                        chapters.append({'title': doc.get_name(), 'src': src})
+            
+            if not chapters:
+                print("Parser: No chapters found with ebooklib.")
+                if method == 1:
+                    return 1, "No chapters found", None, None, None
+            else:
+                chapters_with_text = extract_chapters_with_calibre(chapters, file_path, current_opf_dir, ui_callback_for_path_selection)
                 
-                from audiblez.core import find_cover
-                cover = find_cover(book)
-                cover_info = None
-                if cover and cover.content:
-                    with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as temp_cover_file:
-                        temp_cover_file.write(cover.content)
-                        cover_info = {'type': 'path', 'content': temp_cover_file.name}
+                # Check if we actually got ANY text. If not, this method failed.
+                has_text = any(ch.get('extracted_text') for ch in chapters_with_text)
+                
+                if not has_text:
+                    print("Parser: ebooklib extraction succeeded but no text was found in any chapter. Method 1 FAILED.")
+                    if method == 1:
+                        return 1, "No text extracted from chapters", None, None, None
+                    # If method is None, we implicitly fall through to Method 2.
+                else:
+                    from audiblez.core import find_cover
+                    cover = find_cover(book)
+                    cover_info = None
+                    if cover and cover.content:
+                        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as temp_cover_file:
+                            temp_cover_file.write(cover.content)
+                            cover_info = {'type': 'path', 'content': temp_cover_file.name}
 
-                return 1, "TOC extracted with ebooklib", chapters_with_text, book.metadata, cover_info
+                    return 1, "TOC/Documents extracted with ebooklib", chapters_with_text, book.metadata, cover_info
         except Exception as e:
             print(f"Parser: ebooklib failed to open the book. Reason: {e}")
+            traceback.print_exc()
             if method == 1:
                 return 1, f"Method 1 failed: {e}", None, None, None
 
