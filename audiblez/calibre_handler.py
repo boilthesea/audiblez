@@ -12,7 +12,7 @@ from bs4 import BeautifulSoup
 from types import SimpleNamespace
 import traceback
 
-def extract_chapters_with_calibre(chapters, epub_path, opf_dir, ui_callback_for_path_selection):
+def extract_chapters_with_calibre(chapters, epub_path, opf_dir, ui_callback_for_path_selection, include_skeleton=False):
     temp_dir = tempfile.mkdtemp()
     with zipfile.ZipFile(epub_path, 'r') as z:
         z.extractall(temp_dir)
@@ -21,9 +21,17 @@ def extract_chapters_with_calibre(chapters, epub_path, opf_dir, ui_callback_for_
     for chapter_info in chapters:
         html_path = os.path.join(temp_dir, opf_dir, chapter_info['src'])
         if os.path.exists(html_path):
+            with open(html_path, 'r', encoding='utf-8', errors='ignore') as f_raw:
+                raw_content = f_raw.read()
+                chapter_info['pre_chars'] = len(raw_content)
+                if include_skeleton:
+                    from audiblez.inspector import create_skeleton
+                    chapter_info['skeleton'] = create_skeleton(raw_content)
+
             # Using a simplified conversion to text. A more robust solution might convert to a clean HTML snippet first.
             text_content = convert_html_to_text(html_path, ui_callback_for_path_selection)
             chapter_info['extracted_text'] = text_content
+            chapter_info['post_chars'] = len(text_content)
             extracted_chapters.append(chapter_info)
         else:
             print(f"Warning: Chapter HTML file not found: {html_path}")
@@ -55,7 +63,7 @@ def convert_html_to_text(html_path, ui_callback_for_path_selection):
         if os.path.exists(temp_txt_path):
             os.remove(temp_txt_path)
 
-def open_book_experimental(file_path, ui_callback_for_path_selection, method=None):
+def open_book_experimental(file_path, ui_callback_for_path_selection, method=None, include_skeleton=False):
     """
     Experimental function to open an ebook, with multiple fallbacks for TOC extraction.
     If 'method' (1, 2, or 3) is provided, only that method is attempted.
@@ -134,7 +142,7 @@ def open_book_experimental(file_path, ui_callback_for_path_selection, method=Non
                 if method == 1:
                     return 1, "No chapters found", None, None, None
             else:
-                chapters_with_text = extract_chapters_with_calibre(chapters, file_path, current_opf_dir, ui_callback_for_path_selection)
+                chapters_with_text = extract_chapters_with_calibre(chapters, file_path, current_opf_dir, ui_callback_for_path_selection, include_skeleton=include_skeleton)
                 
                 # Check if we actually got ANY text. If not, this method failed.
                 has_text = any(ch.get('extracted_text') for ch in chapters_with_text)
@@ -276,7 +284,7 @@ def open_book_experimental(file_path, ui_callback_for_path_selection, method=Non
                             chapters.append({'title': title, 'src': src})
                         
                         print("Parser: Successfully extracted and parsed toc.ncx from zip.")
-                        chapters_with_text = extract_chapters_with_calibre(chapters, file_path, opf_dir, ui_callback_for_path_selection)
+                        chapters_with_text = extract_chapters_with_calibre(chapters, file_path, opf_dir, ui_callback_for_path_selection, include_skeleton=include_skeleton)
                         return 2, "TOC extracted from zip", chapters_with_text, metadata, cover_info
                     else:
                         print(f"Parser: toc.ncx not found at {toc_path} or missing in zip.")

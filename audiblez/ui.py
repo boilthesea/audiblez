@@ -673,6 +673,11 @@ class MainWindow(wx.Frame):
         book_details_sizer.Add(length_label, pos=(2, 0), flag=wx.ALL, border=5)
         book_details_sizer.Add(length_text, pos=(2, 1), flag=wx.ALL, border=5)
 
+        # Debug Structure button
+        self.debug_structure_btn = wx.Button(book_details_panel, label="🔍 Debug Structure")
+        self.debug_structure_btn.Bind(wx.EVT_BUTTON, self.on_debug_structure)
+        book_details_sizer.Add(self.debug_structure_btn, pos=(3, 0), span=(1, 2), flag=wx.ALL | wx.EXPAND, border=5)
+
     def create_params_panel(self):
         # --- Replacement for StaticBoxSizer ---
         panel_container = wx.Panel(self.right_panel, style=wx.BORDER_THEME)
@@ -2394,6 +2399,82 @@ class MainWindow(wx.Frame):
                 subprocess.Popen(['open', folder_path])
         except Exception as e:
             print(e)
+
+    def on_debug_structure(self, event):
+        if not self.selected_book:
+            wx.MessageBox("Please open a book first.", "Info")
+            return
+
+        # Ask where to save the report
+        default_name = f"{Path(self.selected_book).stem}_skeleton.html"
+        with wx.FileDialog(self, "Save Structural Report", wildcard="HTML files (*.html)|*.html",
+                           style=wx.FD_SAVE | wx.FD_OVERWRITE_PROMPT, defaultFile=default_name) as fileDialog:
+            if fileDialog.ShowModal() == wx.ID_CANCEL:
+                return
+            report_path = fileDialog.GetPath()
+
+        # Run diagnosis in a background thread or just run it (it's a dry run, should be fast)
+        wx.BeginBusyCursor()
+        try:
+            from audiblez.calibre_handler import open_book_experimental
+            from audiblez.inspector import generate_report
+
+            # Use current parsing method
+            method = self.current_parsing_method + 1 # Method index is 0..2 for Ebooklib, Zip, Calibre Only
+
+            method_id, msg, chapters, metadata, cover = open_book_experimental(
+                self.selected_book, 
+                ui_callback_for_path_selection=self._prompt_for_calibre_path, 
+                method=method,
+                include_skeleton=True
+            )
+
+            if chapters:
+                # Compile data for generate_report
+                # chapters is a list of dicts (from extract_chapters_with_calibre) 
+                # or objects (from find_document_chapters_and_extract_texts)
+                section_data = []
+                for ch in chapters:
+                    if isinstance(ch, dict):
+                        section_data.append(ch)
+                    else:
+                        # Convert SimpleNamespace or ebooklib item to dict
+                        section_data.append({
+                            'title': getattr(ch, 'title', getattr(ch, 'get_name', lambda: 'Chapter')()),
+                            'src': getattr(ch, 'src', getattr(ch, 'file_name', 'N/A')),
+                            'pre_chars': getattr(ch, 'pre_chars', 0),
+                            'post_chars': getattr(ch, 'post_chars', 0),
+                            'skeleton': getattr(ch, 'skeleton', '')
+                        })
+
+                # Metadata needs to be a dict
+                meta_dict = {}
+                if isinstance(metadata, dict):
+                    meta_dict = metadata
+                else:
+                    # Parse metadata from ebooklib if needed (though open_book_experimental usually returns dict or list)
+                    # metadata could be an ebooklib metadata list or similar.
+                    if hasattr(metadata, 'get'): # It might be a dict-like from EbookLib
+                         meta_dict = {'title': metadata.get('DC', {}).get('title', [('Unknown',)])[0][0], 
+                                      'creator': metadata.get('DC', {}).get('creator', [('Unknown',)])[0][0]}
+                    else:
+                         meta_dict = {'title': str(metadata), 'creator': 'Unknown'}
+
+                generate_report(meta_dict, section_data, report_path)
+                wx.EndBusyCursor()
+                
+                if wx.MessageBox(f"Report generated successfully: {report_path}\n\nWould you like to open it now?", 
+                                 "Success", wx.YES_NO | wx.ICON_INFORMATION) == wx.YES:
+                    self.open_folder_with_explorer(report_path) # reuse opening logic if it works for files
+            else:
+                wx.EndBusyCursor()
+                wx.MessageBox(f"Failed to extract sections for debugging: {msg}", "Error", wx.ICON_ERROR)
+
+        except Exception as e:
+            if wx.IsBusy(): wx.EndBusyCursor()
+            import traceback
+            traceback.print_exc()
+            wx.MessageBox(f"Error generating report: {e}", "Error", wx.ICON_ERROR)
 
 
 class CoreThread(threading.Thread):

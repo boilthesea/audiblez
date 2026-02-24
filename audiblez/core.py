@@ -330,13 +330,18 @@ def gen_text(text, voice='af_heart', output_file='text.wav', speed=1, play=False
         subprocess.run(['ffplay', '-autoexit', '-nodisp', output_file])
 
 
-def find_document_chapters_and_extract_texts(book):
+def find_document_chapters_and_extract_texts(book, include_skeleton=False):
     """Returns every chapter that is an ITEM_DOCUMENT and enriches each chapter with extracted_text."""
     document_chapters = []
     for chapter in book.get_items():
         if chapter.get_type() != ebooklib.ITEM_DOCUMENT:
             continue
         xml = chapter.get_body_content()
+        chapter.pre_chars = len(xml)
+        if include_skeleton:
+            from audiblez.inspector import create_skeleton
+            chapter.skeleton = create_skeleton(xml)
+            
         soup = BeautifulSoup(xml, features='lxml')
         chapter.extracted_text = ''
         html_content_tags = ['title', 'p', 'h1', 'h2', 'h3', 'h4', 'li']
@@ -344,6 +349,7 @@ def find_document_chapters_and_extract_texts(book):
             if not text.endswith('.'):
                 text += '.'
             chapter.extracted_text += text + '\n'
+        chapter.post_chars = len(chapter.extracted_text)
         document_chapters.append(chapter)
     for i, c in enumerate(document_chapters):
         c.chapter_index = i  # this is used in the UI to identify chapters
