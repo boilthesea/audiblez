@@ -1,4 +1,53 @@
-# Audiblez: Generate  audiobooks from e-books
+# Audiblez (Windows Optimized Fork)
+
+[![GitHub Repo](https://img.shields.io/badge/GitHub-Repo-blue?style=flat-square&logo=github)](https://github.com/boilthesea/audiblez)
+
+This is a specialized fork of [Claudio Santini's Audiblez](https://github.com/santinic/audiblez), optimized for Windows environments with significant architecture improvements and feature additions.
+
+### ✨ Key Enhancements in this Fork
+
+- 🌓 **UI Refinement**: Added Dark Mode support and optimized layouts.
+- 🍗 **Extra Crunchy M4B Assembly**: Improved Windows-specific FFmpeg concatenation for more robust audiobook generation.
+- 📚 **Advanced Parsing**: Enhanced EPUB chapter detection, including a specialized **Calibre Handler**.
+- 🗄️ **Persistent Settings**: SQLite-backed database for user preferences, book staging, and a synthesis queue.
+- ⚡ **Expanded Engines**: Built-in support for **Qwen3-TTS** alongside the original Kokoro-82M.
+- 🛠️ **Windows Stability**: Fixed numerous pathing and process-locking issues common on Windows systems.
+- 📊 **Better UX**: Improved progress estimation and multi-file queue management.
+
+---
+
+## 🚀 Quick Start (Windows)
+
+### Prerequisites
+
+1. [Python 3.12](https://www.python.org/downloads/) (Strictly recommended, but if you use UV it can install it automatically)
+2. [FFmpeg](https://ffmpeg.org/download.html#build-windows) (Must be in your system PATH)
+3. [espeak-ng](https://github.com/espeak-ng/espeak-ng/releases) (Required for phoneme generation)
+
+### Installation
+
+We recommend using [uv](https://github.com/astral-sh/uv) for the fastest and cleanest setup:
+
+```powershell
+# 1. Create a virtual environment specifically with Python 3.12
+uv venv --python 3.12
+.\.venv\Scripts\activate
+
+# 2. Install GPU-accelerated PyTorch (assuming CUDA 12.x)
+uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+
+# 3. Install Audiblez in 'editable' mode (with UI dependencies)
+uv pip install -e .
+uv pip install wxpython pillow
+```
+
+### Running
+
+- **GUI**: `audiblez-ui`
+
+---
+
+# Original Audiblez README
 
 [![Installing via pip and running](https://github.com/santinic/audiblez/actions/workflows/pip-install.yaml/badge.svg)](https://github.com/santinic/audiblez/actions/workflows/pip-install.yaml)
 [![Git clone and run](https://github.com/santinic/audiblez/actions/workflows/git-clone-and-run.yml/badge.svg)](https://github.com/santinic/audiblez/actions/workflows/git-clone-and-run.yml)
@@ -19,7 +68,6 @@ It currently supports these languages: 🇺🇸 🇬🇧 🇪🇸 🇫🇷 🇮�
 On a Google Colab's T4 GPU via Cuda, **it takes about 5 minutes to convert "Animal's Farm" by Orwell** (which is about 160,000 characters) to audiobook, at a rate of about 600 characters per second.
 
 On my M2 MacBook Pro, on CPU, it takes about 1 hour, at a rate of about 60 characters per second.
-
 
 ## How to install the Command Line tool
 
@@ -53,13 +101,14 @@ The GUI is a simple graphical interface to use audiblez.
 You need some extra dependencies to run the GUI:
 
 ```
-sudo apt install ffmpeg espeak-ng 
+sudo apt install ffmpeg espeak-ng
 sudo apt install libgtk-3-dev        # just for Ubuntu/Debian 🐧, Windows/Mac don't need this
-  
+
 pip install audiblez pillow wxpython
 ```
 
 Then you can run the GUI with:
+
 ```
 audiblez-ui
 ```
@@ -77,7 +126,6 @@ After many trials, on Windows we recommend to install audiblez in a Python venv:
 7. Now you can run `audiblez` or `audiblez-ui`
 8. For Cuda support, you need to install Pytorch accordingly: https://pytorch.org/get-started/locally/
 
-
 ## Speed
 
 By default the audio is generated using a normal speed, but you can make it up to twice slower or faster by specifying a speed argument between 0.5 to 2.0:
@@ -93,8 +141,8 @@ The first letter is the language code and the second is the gender of the speake
 
 [For hearing samples of Kokoro-82M voices, go here](https://claudio.uk/posts/audiblez-v4.html)
 
-| Language                  | Voices                                                                                                                                                                                                                                     |
-|---------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Language                | Voices                                                                                                                                                                                                                                     |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | 🇺🇸 American English     | `af_alloy`, `af_aoede`, `af_bella`, `af_heart`, `af_jessica`, `af_kore`, `af_nicole`, `af_nova`, `af_river`, `af_sarah`, `af_sky`, `am_adam`, `am_echo`, `am_eric`, `am_fenrir`, `am_liam`, `am_michael`, `am_onyx`, `am_puck`, `am_santa` |
 | 🇬🇧 British English      | `bf_alice`, `bf_emma`, `bf_isabella`, `bf_lily`, `bm_daniel`, `bm_fable`, `bm_george`, `bm_lewis`                                                                                                                                          |
 | 🇪🇸 Spanish              | `ef_dora`, `em_alex`, `em_santa`                                                                                                                                                                                                           |
@@ -119,7 +167,6 @@ We don't currently support Apple Silicon, as there is not yet a Kokoro implement
 
 Sometimes you want to manually select which chapters/sections in the e-book to read out loud.
 To do so, you can use `--pick` to interactively choose the chapters to convert (without running the GUI).
-
 
 ## Help page
 
