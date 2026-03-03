@@ -56,8 +56,13 @@ class AudiblezApp(ctk.CTk):
         self.tab_view.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
         
         self.chapters_tab = ChaptersTab(self.tab_view.add("Chapters"), self)
+        self.chapters_tab.pack(expand=True, fill="both")
+        
         self.staging_tab = StagingTab(self.tab_view.add("Staging"), self)
+        self.staging_tab.pack(expand=True, fill="both")
+        
         self.queue_tab = QueueTab(self.tab_view.add("Queue"), self)
+        self.queue_tab.pack(expand=True, fill="both")
 
         # Right Side: Panels
         self.right_container = ctk.CTkFrame(self.main_container, fg_color="transparent")
@@ -188,12 +193,13 @@ class AudiblezApp(ctk.CTk):
         # Prepare parameters
         voice = self.params.voice_var.get().split(' ')[1] # Just the voice name
         params = {
-            'input_file': None, # We use pre-extracted text for chapters
+            'file_path': self.selected_file_path,
             'voice': voice,
+            'pick_manually': False,
             'speed': float(self.params.speed_var.get()),
             'engine': self.params.engine_var.get(),
             'output_folder': self.params.output_path.get() or ".",
-            'chapters': [c for i, c in enumerate(self.current_book['chapters']) if self.chapters_tab.chapter_vars[i].get()],
+            'selected_chapters': [c for i, c in enumerate(self.current_book['chapters']) if self.chapters_tab.chapter_vars[i].get()],
             'm4b_assembly_method': self.params.m4b_var.get()
         }
 

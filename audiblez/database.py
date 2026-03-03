@@ -50,6 +50,7 @@ def create_tables(conn: sqlite3.Connection):
             m4b_assembly_method TEXT,
             dark_mode TEXT,
             window_geometry TEXT,
+            output_folder TEXT,
             PRIMARY KEY (ui_name)
         )
     """)
@@ -82,6 +83,15 @@ def create_tables(conn: sqlite3.Connection):
     except sqlite3.OperationalError as e:
         if "duplicate column name" in str(e).lower():
             pass  # Column already exists
+        else:
+            raise
+
+    # Add output_folder column
+    try:
+        cursor.execute("ALTER TABLE user_settings ADD COLUMN output_folder TEXT")
+    except sqlite3.OperationalError as e:
+        if "duplicate column name" in str(e).lower():
+            pass
         else:
             raise
 
@@ -161,7 +171,7 @@ def save_user_setting(setting_name: str, setting_value, ui_name='wx'):
     conn = connect_db()
     cursor = conn.cursor()
     try:
-        valid_columns = ["engine", "voice", "speed", "custom_rate", "next_scheduled_run", "calibre_ebook_convert_path", "m4b_assembly_method", "dark_mode", "window_geometry"]
+        valid_columns = ["engine", "voice", "speed", "custom_rate", "next_scheduled_run", "calibre_ebook_convert_path", "m4b_assembly_method", "dark_mode", "window_geometry", "output_folder"]
         if setting_name not in valid_columns:
             print(f"Error: Invalid setting_name '{setting_name}' for update/insert.")
             return
@@ -197,7 +207,7 @@ def load_user_setting(setting_name: str, ui_name='wx'):
     conn = connect_db()
     cursor = conn.cursor()
     try:
-        valid_columns = ["engine", "voice", "speed", "custom_rate", "next_scheduled_run", "calibre_ebook_convert_path", "m4b_assembly_method", "dark_mode", "window_geometry"]
+        valid_columns = ["engine", "voice", "speed", "custom_rate", "next_scheduled_run", "calibre_ebook_convert_path", "m4b_assembly_method", "dark_mode", "window_geometry", "output_folder"]
         if setting_name not in valid_columns:
             print(f"Error: Invalid setting_name '{setting_name}' for load.")
             return None
@@ -224,7 +234,7 @@ def load_all_user_settings(ui_name='wx') -> dict:
     cursor = conn.cursor()
     settings = {}
     try:
-        cursor.execute("SELECT engine, voice, speed, custom_rate, next_scheduled_run, calibre_ebook_convert_path, m4b_assembly_method, dark_mode, window_geometry FROM user_settings WHERE ui_name = ?", (ui_name,))
+        cursor.execute("SELECT engine, voice, speed, custom_rate, next_scheduled_run, calibre_ebook_convert_path, m4b_assembly_method, dark_mode, window_geometry, output_folder FROM user_settings WHERE ui_name = ?", (ui_name,))
         row = cursor.fetchone()
         if row:
             settings = {
@@ -237,6 +247,7 @@ def load_all_user_settings(ui_name='wx') -> dict:
                 "m4b_assembly_method": row[6],
                 "dark_mode": row[7],
                 "window_geometry": row[8],
+                "output_folder": row[9],
             }
         return settings
     except sqlite3.Error as e:

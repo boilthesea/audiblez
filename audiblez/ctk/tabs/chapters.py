@@ -60,9 +60,8 @@ class ChaptersTab(ctk.CTkFrame):
             var = ctk.BooleanVar(value=True)
             self.chapter_vars.append(var)
             
-            btn = ctk.CTkCheckBox(self.scroll_frame, text=chapter.get('title', f"Chapter {i+1}"), variable=var)
+            btn = ctk.CTkCheckBox(self.scroll_frame, text=chapter.get('title', f"Chapter {i+1}"), variable=var, command=lambda c=chapter: self.on_chapter_select(c))
             btn.pack(fill="x", padx=10, pady=2)
-            btn.bind("<Button-1>", lambda e, c=chapter: self.on_chapter_select(c))
 
         if chapters:
             self.on_chapter_select(chapters[0])
