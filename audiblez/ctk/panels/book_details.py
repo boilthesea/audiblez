@@ -39,8 +39,12 @@ class BookDetailsPanel(ctk.CTkFrame):
         self.length_label.grid(row=2, column=1, sticky="ew")
         self.content.grid_rowconfigure(2, weight=1)
 
+        self.selection_label = ctk.CTkLabel(self.content, text="Selection Total: ---", anchor="w", font=("Inter", 12, "bold"))
+        self.selection_label.grid(row=3, column=1, sticky="ew")
+        self.content.grid_rowconfigure(3, weight=1)
+
         self.debug_btn = ctk.CTkButton(self.content, text="🔍 Debug Structure", command=self.on_debug)
-        self.debug_btn.grid(row=3, column=1, sticky="ew", pady=(10, 0))
+        self.debug_btn.grid(row=4, column=1, sticky="ew", pady=(10, 0))
 
     def on_debug(self):
         if not hasattr(self.controller, 'selected_file_path') or not self.controller.selected_file_path:
@@ -145,3 +149,6 @@ class BookDetailsPanel(ctk.CTkFrame):
                 self.cover_label.configure(image=None, text="Error Loading Cover")
         else:
             self.cover_label.configure(image=None, text="No Cover Art")
+
+    def update_selection_total(self, length):
+        self.selection_label.configure(text=f"Selection Total: {length:,} characters")

@@ -167,6 +167,12 @@ class AudiblezApp(ctk.CTk):
         
         print(f"UI Updated for: {title}")
 
+    def update_stats(self):
+        if hasattr(self, 'current_book'):
+            chapters = self.current_book['chapters']
+            selected_len = sum(len(c.get('extracted_text', '')) for i, c in enumerate(chapters) if self.chapters_tab.chapter_vars[i].get())
+            self.book_details.update_selection_total(selected_len)
+
     def start_synthesis(self):
         if not hasattr(self, 'current_book'):
             print("No book loaded.")

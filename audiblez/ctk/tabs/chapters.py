@@ -42,8 +42,17 @@ class ChaptersTab(ctk.CTkFrame):
         self.parser_switch.set(initial_val)
         self.parser_switch.pack(side="left", fill="x", expand=True)
 
+        self.scroll_header = ctk.CTkFrame(self.list_frame, fg_color="transparent")
+        self.scroll_header.grid(row=2, column=0, sticky="ew", padx=10)
+        self.scroll_header.columnconfigure(1, weight=1)
+        
+        ctk.CTkLabel(self.scroll_header, text="Inc.", font=("Inter", 11, "bold"), width=40).grid(row=0, column=0, sticky="w")
+        ctk.CTkLabel(self.scroll_header, text="Chapter Name", font=("Inter", 11, "bold")).grid(row=0, column=1, sticky="w", padx=10)
+        ctk.CTkLabel(self.scroll_header, text="Length", font=("Inter", 11, "bold"), width=80).grid(row=0, column=2, sticky="e")
+
         self.scroll_frame = ctk.CTkScrollableFrame(self.list_frame)
-        self.scroll_frame.grid(row=2, column=0, sticky="nsew", padx=5, pady=5)
+        self.scroll_frame.grid(row=3, column=0, sticky="nsew", padx=5, pady=(0, 5))
+        self.list_frame.grid_rowconfigure(3, weight=1)
 
         # Right: Text Preview & Edit
         self.preview_frame = ctk.CTkFrame(self)
@@ -80,14 +89,49 @@ class ChaptersTab(ctk.CTkFrame):
 
         self.chapter_vars = []
         for i, chapter in enumerate(chapters):
-            var = ctk.BooleanVar(value=True)
+            var = ctk.BooleanVar(value=chapter.get('is_selected', True))
             self.chapter_vars.append(var)
             
-            btn = ctk.CTkCheckBox(self.scroll_frame, text=chapter.get('title', f"Chapter {i+1}"), variable=var, command=lambda c=chapter: self.on_chapter_select(c))
-            btn.pack(fill="x", padx=10, pady=2)
+            # Row frame
+            row = ctk.CTkFrame(self.scroll_frame, fg_color="transparent")
+            row.pack(fill="x", padx=5, pady=1)
+            row.columnconfigure(1, weight=1)
+            
+            cb_container = ctk.CTkFrame(row, fg_color="transparent", width=40)
+            cb_container.grid(row=0, column=0, sticky="w")
+            cb_container.grid_propagate(False)
+            
+            cb = ctk.CTkCheckBox(cb_container, text="", variable=var, width=20, command=self.on_toggle_selection)
+            cb.place(relx=0.5, rely=0.5, anchor="center")
+            
+            title = chapter.get('title', f"Chapter {i+1}")
+            text_len = len(chapter.get('extracted_text', ''))
+            
+            name_btn = ctk.CTkButton(
+                row, 
+                text=title, 
+                fg_color="transparent", 
+                text_color=("gray10", "gray90"),
+                anchor="w", 
+                hover_color=("gray70", "gray30"),
+                height=24,
+                command=lambda c=chapter: self.on_chapter_select(c)
+            )
+            name_btn.grid(row=0, column=1, sticky="ew", padx=(5, 10))
+            
+            len_label = ctk.CTkLabel(row, text=f"{text_len:,}", font=("Inter", 11), width=80, anchor="e")
+            len_label.grid(row=0, column=2, sticky="e", padx=(0, 5))
 
         if chapters:
             self.on_chapter_select(chapters[0])
+        
+        self.on_toggle_selection()
+
+    def on_toggle_selection(self):
+        # Update app-level selection total if it exists
+        if hasattr(self.controller, 'update_stats'):
+            self.controller.update_stats()
+
 
     def on_chapter_select(self, chapter):
         self.selected_chapter = chapter
