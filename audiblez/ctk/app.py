@@ -106,9 +106,24 @@ class AudiblezApp(ctk.CTk):
                 print(f"Failed to load chapters: {msg}")
                 return
 
-            title = metadata.get('title', [Path(file_path).stem])[0]
-            author = metadata.get('creator', ['Unknown Author'])[0]
+            # Normalize metadata handling (Method 1/2 returns list of tuples, Method 3 returns strings)
+            def get_meta_field(field_name, default):
+                val = metadata.get(field_name)
+                if not val: return default
+                if isinstance(val, list):
+                    if isinstance(val[0], tuple): return val[0][0]
+                    return val[0]
+                return val
+
+            title = get_meta_field('title', Path(file_path).stem)
+            author = get_meta_field('creator', 'Unknown Author')
             
+            # Deselect chapters with "gutenberg" in the title
+            for chapter in chapters:
+                if 'gutenberg' in chapter['title'].lower():
+                    chapter['is_selected'] = False
+                    print(f"Deselecting chapter '{chapter['title']}' due to 'gutenberg' in title.")
+
             # Update UI in main thread
             self.after(0, lambda: self._load_book_data_into_ui(
                 title=title,
