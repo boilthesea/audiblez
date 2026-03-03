@@ -18,15 +18,15 @@ class ChaptersTab(ctk.CTkFrame):
         # Left: Chapter List
         self.list_frame = ctk.CTkFrame(self)
         self.list_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
-        self.list_frame.grid_rowconfigure(2, weight=1)
+        self.list_frame.grid_rowconfigure(3, weight=1)
         self.list_frame.grid_columnconfigure(0, weight=1)
 
         self.list_label = ctk.CTkLabel(self.list_frame, text="Chapters", font=("Inter", 14, "bold"))
-        self.list_label.grid(row=0, column=0, sticky="nw", padx=10, pady=5)
+        self.list_label.grid(row=0, column=0, sticky="nw", padx=10, pady=(5, 2))
 
         # Parser selection - matching legacy UX
         self.parser_frame = ctk.CTkFrame(self.list_frame, fg_color="transparent")
-        self.parser_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 5))
+        self.parser_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 2))
         
         ctk.CTkLabel(self.parser_frame, text="Parsing Method:", font=("Inter", 11)).pack(side="left", padx=(0, 5))
         
@@ -42,9 +42,10 @@ class ChaptersTab(ctk.CTkFrame):
         self.parser_switch.set(initial_val)
         self.parser_switch.pack(side="left", fill="x", expand=True)
 
-        self.scroll_header = ctk.CTkFrame(self.list_frame, fg_color="transparent")
-        self.scroll_header.grid(row=2, column=0, sticky="ew", padx=10)
+        self.scroll_header = ctk.CTkFrame(self.list_frame, fg_color="transparent", height=24)
+        self.scroll_header.grid(row=2, column=0, sticky="ew", padx=10, pady=(2, 0))
         self.scroll_header.columnconfigure(1, weight=1)
+        self.scroll_header.grid_propagate(False)
         
         ctk.CTkLabel(self.scroll_header, text="Inc.", font=("Inter", 11, "bold"), width=40).grid(row=0, column=0, sticky="w")
         ctk.CTkLabel(self.scroll_header, text="Chapter Name", font=("Inter", 11, "bold")).grid(row=0, column=1, sticky="w", padx=10)
@@ -93,11 +94,12 @@ class ChaptersTab(ctk.CTkFrame):
             self.chapter_vars.append(var)
             
             # Row frame
-            row = ctk.CTkFrame(self.scroll_frame, fg_color="transparent")
-            row.pack(fill="x", padx=5, pady=1)
+            row = ctk.CTkFrame(self.scroll_frame, fg_color="transparent", height=28)
+            row.pack(fill="x", padx=5, pady=0)
             row.columnconfigure(1, weight=1)
+            row.grid_propagate(False)
             
-            cb_container = ctk.CTkFrame(row, fg_color="transparent", width=40)
+            cb_container = ctk.CTkFrame(row, fg_color="transparent", width=40, height=28)
             cb_container.grid(row=0, column=0, sticky="w")
             cb_container.grid_propagate(False)
             

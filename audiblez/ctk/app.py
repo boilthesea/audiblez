@@ -48,7 +48,7 @@ class AudiblezApp(ctk.CTk):
         # Main Splitter replacement
         self.main_container = ctk.CTkFrame(self, corner_radius=0)
         self.main_container.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
-        self.main_container.grid_columnconfigure(0, weight=2) # Left: Tabs
+        self.main_container.grid_columnconfigure(0, weight=3) # Left: Tabs
         self.main_container.grid_columnconfigure(1, weight=1) # Right: Panels
         self.main_container.grid_rowconfigure(0, weight=1)
 
