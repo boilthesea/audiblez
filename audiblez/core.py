@@ -76,7 +76,7 @@ def set_espeak_library():
 def main(file_path, voice, pick_manually, speed, output_folder='.',
          max_chapters=None, max_sentences=None, selected_chapters=None, post_event=None,
          calibre_metadata: dict | None = None, calibre_cover_image_path: str | None = None,
-         m4b_assembly_method: str = 'original'):
+         m4b_assembly_method: str = 'original', engine=None):
     if post_event: post_event('CORE_STARTED')
     load_spacy()
     if output_folder != '.':
@@ -182,7 +182,7 @@ def main(file_path, voice, pick_manually, speed, output_folder='.',
     eta = strfdelta((stats.total_chars - stats.processed_chars) / stats.chars_per_sec)
     print(f'Estimated time remaining (assuming {stats.chars_per_sec} chars/sec): {eta}')
     set_espeak_library()
-    pipeline = KPipeline(lang_code=voice[0])  # a for american or b for british etc.
+    pipeline = KPipeline(lang_code=voice[0], device=engine)  # a for american or b for british etc.
 
     chapter_wav_files = []
     for i, chapter in enumerate(selected_chapters, start=1):
@@ -319,9 +319,9 @@ def gen_audio_segments(pipeline, text, voice, speed, stats=None, max_sentences=N
     return audio_segments
 
 
-def gen_text(text, voice='af_heart', output_file='text.wav', speed=1, play=False):
+def gen_text(text, voice='af_heart', output_file='text.wav', speed=1, play=False, engine=None):
     lang_code = voice[:1]
-    pipeline = KPipeline(lang_code=lang_code)
+    pipeline = KPipeline(lang_code=lang_code, device=engine)
     load_spacy()
     audio_segments = gen_audio_segments(pipeline, text, voice=voice, speed=speed);
     final_audio = np.concatenate(audio_segments)
