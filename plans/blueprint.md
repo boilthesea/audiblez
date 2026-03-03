@@ -23,21 +23,23 @@ The application follows a modular "Engine" pattern, allowing different TTS backe
 ### Management & Entry Points
 
 - **[cli.py](file:///s:/Files/nexus/http/audiblez/audiblez/cli.py)**: Entry point for the Command Line Interface. Handles argument parsing and execution flow.
-- **[ui.py](file:///s:/Files/nexus/http/audiblez/audiblez/ui.py)**: Comprehensive wxPython GUI implementation.
-- **[database.py](file:///s:/Files/nexus/http/audiblez/audiblez/database.py)**: SQLite integration for persisting user settings, chapter staging, and the synthesis queue.
+- **[ui.py](file:///s:/Files/nexus/http/audiblez/audiblez/ui.py)**: Modern **CustomTkinter** GUI entry point. Now the primary interface.
+- **[ui_wx.py](file:///s:/Files/nexus/http/audiblez/audiblez/ui_wx.py)**: Legacy wxPython GUI implementation. Maintained for compatibility.
+- **[ctk/](file:///s:/Files/nexus/http/audiblez/audiblez/ctk/)**: Modular components for the modern UI (tabs, panels, custom widgets).
+- **[database.py](file:///s:/Files/nexus/http/audiblez/audiblez/database.py)**: SQLite integration. Enhanced to support isolated settings for different UIs (`ui_name` key) and persistent output folders.
 
 ### Synthesis & Logic
 
 - **[core.py](file:///s:/Files/nexus/http/audiblez/audiblez/core.py)**: The central logic hub. Manages the conversion lifecycle, chapter discovery, and final file assembly via FFmpeg.
 - **[engines/](file:///s:/Files/nexus/http/audiblez/audiblez/engines/)**: Modular TTS drivers.
   - `base.py`: Abstract base class for all engines.
-  - `kokoro_engine.py`: Default high-speed engine.
-  - `qwen3_engine.py`: Support for advanced LLM-based TTS. [TODO]
+  - `kokoro_engine.py`: Default high-speed engine. Includes CPU/CUDA device selection.
+  - `qwen3_engine.py`: Support for advanced LLM-based TTS. [Testing]
 - **[voices.py](file:///s:/Files/nexus/http/audiblez/audiblez/voices.py)**: Configuration and list of supported TTS voices across different languages.
 
 ### Utilities
 
-- **[calibre_handler.py](file:///s:/Files/nexus/http/audiblez/audiblez/calibre_handler.py)**: Specialized logic for parsing EPUBs that follow Calibre's specific structure.
+- **[calibre_handler.py](file:///s:/Files/nexus/http/audiblez/audiblez/calibre_handler.py)**: Optimized logic for parsing EPUBs. Now includes three experimental methods: Standard (ebooklib), Zip-direct, and Calibre-only (conversion).
 - **[text_utils.py](file:///s:/Files/nexus/http/audiblez/audiblez/text_utils.py)**: Helpers for text normalization and sentence-level chunking.
 - **[inspector.py](file:///s:/Files/nexus/http/audiblez/audiblez/inspector.py)**: Debugging tool for analyzing EPUB structure and metadata.
 

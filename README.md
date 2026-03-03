@@ -6,12 +6,14 @@ This is a specialized fork of [Claudio Santini's Audiblez](https://github.com/sa
 
 ### ✨ Key Enhancements in this Fork
 
-- 🌓 **UI Refinement**: Added Dark Mode support and optimized layouts.
+- 🌓 **Modern CustomTkinter UI**: A sleek, dark-mode-only interface with modular design.
 - 🍗 **Extra Crunchy M4B Assembly**: Improved Windows-specific FFmpeg concatenation for more robust audiobook generation.
-- 📚 **Advanced Parsing**: Enhanced EPUB chapter detection, including a specialized **Calibre Handler**.
-- 🗄️ **Persistent Settings**: SQLite-backed database for user preferences, book staging, and a synthesis queue.
-- ⚡ **Expanded Engines**: Built-in support for **Qwen3-TTS** alongside the original Kokoro-82M.
+- 📚 **Advanced Parsing**: Enhanced EPUB chapter detection with three experimental methods (Standard, Zip, **Calibre-Only**).
+- 🗄️ **Persistent Settings**: SQLite-backed database for user preferences, book staging, and a synthesis queue, with multi-UI support.
+- ⚡ **Expanded Engines**: Built-in support for **Qwen3-TTS** alongside the original Kokoro-82M, with CPU/CUDA selection.
 - 🛠️ **Windows Stability**: Fixed numerous pathing and process-locking issues common on Windows systems.
+- 🔊 **Audio Preview**: Generate and hear a snippet of any chapter before starting the full conversion.
+- 🔍 **Inspector Debugging**: Generate HTML skeleton reports to debug EPUB parsing issues.
 - 📊 **Better UX**: Improved progress estimation and multi-file queue management.
 
 ---
@@ -36,14 +38,16 @@ uv venv --python 3.12
 # 2. Install GPU-accelerated PyTorch (assuming CUDA 12.x)
 uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
 
-# 3. Install Audiblez in 'editable' mode (with UI dependencies)
+# 3. Install Audiblez in 'editable' mode
 uv pip install -e .
-uv pip install wxpython pillow
+uv pip install customtkinter pillow wxpython
 ```
 
 ### Running
 
-- **GUI**: `audiblez-ui`
+- **GUI (Modern)**: `audiblez-ui`
+- **GUI (Legacy)**: `python audiblez/ui_wx.py`
+- **CLI**: `audiblez --help`
 
 ---
 
