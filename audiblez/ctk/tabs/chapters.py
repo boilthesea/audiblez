@@ -18,14 +18,32 @@ class ChaptersTab(ctk.CTkFrame):
         # Left: Chapter List
         self.list_frame = ctk.CTkFrame(self)
         self.list_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
-        self.list_frame.grid_rowconfigure(1, weight=1)
+        self.list_frame.grid_rowconfigure(2, weight=1)
         self.list_frame.grid_columnconfigure(0, weight=1)
 
         self.list_label = ctk.CTkLabel(self.list_frame, text="Chapters", font=("Inter", 14, "bold"))
         self.list_label.grid(row=0, column=0, sticky="nw", padx=10, pady=5)
 
+        # Parser selection - matching legacy UX
+        self.parser_frame = ctk.CTkFrame(self.list_frame, fg_color="transparent")
+        self.parser_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 5))
+        
+        ctk.CTkLabel(self.parser_frame, text="Parsing Method:", font=("Inter", 11)).pack(side="left", padx=(0, 5))
+        
+        self.parser_switch = ctk.CTkSegmentedButton(
+            self.parser_frame, 
+            values=["Standard", "Zip", "Calibre Only"],
+            command=self.on_parser_change
+        )
+        # Map current_parsing_method (1,2,3) to values
+        initial_val = "Standard"
+        if self.controller.current_parsing_method == 2: initial_val = "Zip"
+        if self.controller.current_parsing_method == 3: initial_val = "Calibre Only"
+        self.parser_switch.set(initial_val)
+        self.parser_switch.pack(side="left", fill="x", expand=True)
+
         self.scroll_frame = ctk.CTkScrollableFrame(self.list_frame)
-        self.scroll_frame.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
+        self.scroll_frame.grid(row=2, column=0, sticky="nsew", padx=5, pady=5)
 
         # Right: Text Preview & Edit
         self.preview_frame = ctk.CTkFrame(self)
@@ -49,6 +67,11 @@ class ChaptersTab(ctk.CTkFrame):
         self.staging_btn.grid(row=2, column=0, sticky="ew", padx=10, pady=10)
 
         self.preview_threads = []
+
+    def on_parser_change(self, value):
+        mapping = {"Standard": 1, "Zip": 2, "Calibre Only": 3}
+        self.controller.current_parsing_method = mapping.get(value, 1)
+        print(f"Parsing method changed to: {value} ({self.controller.current_parsing_method})")
 
     def load_chapters(self, chapters):
         self.chapters = chapters

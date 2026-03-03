@@ -51,6 +51,11 @@ class ParamsPanel(ctk.CTkFrame):
         ctk.CTkLabel(self, text="Output:").grid(row=5, column=0, sticky="w", padx=10, pady=5)
         self.output_path = ctk.CTkEntry(self)
         self.output_path.grid(row=5, column=1, sticky="ew", padx=(10, 80), pady=5)
+        
+        saved_output = self.controller.user_settings.get('output_folder', '')
+        if saved_output:
+            self.output_path.insert(0, saved_output)
+            
         self.output_btn = ctk.CTkButton(self, text="📂", width=60, command=self.select_output)
         self.output_btn.grid(row=5, column=1, sticky="e", padx=(0, 10), pady=5)
 

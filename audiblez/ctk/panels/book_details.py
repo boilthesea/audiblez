@@ -29,12 +29,15 @@ class BookDetailsPanel(ctk.CTkFrame):
         # Metadata
         self.title_label = ctk.CTkLabel(self.content, text="Title: ---", anchor="w")
         self.title_label.grid(row=0, column=1, sticky="ew")
+        self.content.grid_rowconfigure(0, weight=1)
 
         self.author_label = ctk.CTkLabel(self.content, text="Author: ---", anchor="w")
         self.author_label.grid(row=1, column=1, sticky="ew")
+        self.content.grid_rowconfigure(1, weight=1)
 
         self.length_label = ctk.CTkLabel(self.content, text="Total Length: ---", anchor="w")
         self.length_label.grid(row=2, column=1, sticky="ew")
+        self.content.grid_rowconfigure(2, weight=1)
 
         self.debug_btn = ctk.CTkButton(self.content, text="🔍 Debug Structure", command=self.on_debug)
         self.debug_btn.grid(row=3, column=1, sticky="ew", pady=(10, 0))

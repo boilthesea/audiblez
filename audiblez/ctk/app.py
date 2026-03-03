@@ -17,7 +17,7 @@ class AudiblezApp(ctk.CTk):
         # Load settings
         self.user_settings = db.load_all_user_settings(ui_name='ctk')
         self.selected_file_path = None
-        self.current_parsing_method = 0
+        self.current_parsing_method = 1 # 1: Standard, 2: Zip, 3: Calibre
         
         # Window configuration
         self.title(APP_NAME)
@@ -50,6 +50,7 @@ class AudiblezApp(ctk.CTk):
         self.main_container.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
         self.main_container.grid_columnconfigure(0, weight=2) # Left: Tabs
         self.main_container.grid_columnconfigure(1, weight=1) # Right: Panels
+        self.main_container.grid_rowconfigure(0, weight=1)
 
         # Left Side: Notebook (Tabs)
         self.tab_view = ctk.CTkTabview(self.main_container)
@@ -84,82 +85,50 @@ class AudiblezApp(ctk.CTk):
         file_path = ctk.filedialog.askopenfilename(filetypes=[("EPUB Files", "*.epub")])
         if file_path:
             self.selected_file_path = file_path
-            self.current_parsing_method = 0
-            threading.Thread(target=self._load_epub_file, args=(file_path,), daemon=True).start()
+            # Use the method selected in the ChaptersTab if it exists, else default to 1 (Standard)
+            method = getattr(self, 'current_parsing_method', 1)
+            threading.Thread(target=self._load_book_file_threaded, args=(file_path,), kwargs={'method': method}, daemon=True).start()
 
-    def _load_epub_file(self, file_path):
-        from ebooklib import epub
-        from audiblez.core import find_document_chapters_and_extract_texts, find_cover
+    def _load_book_file_threaded(self, file_path, method=1):
+        from audiblez.calibre_handler import open_book_experimental
         from pathlib import Path
+        import traceback
 
         try:
-            book = epub.read_epub(file_path)
-            meta_title = book.get_metadata('DC', 'title')
-            title = meta_title[0][0] if meta_title else Path(file_path).stem
-            meta_creator = book.get_metadata('DC', 'creator')
-            author = meta_creator[0][0] if meta_creator else 'Unknown Author'
+            # Use open_book_experimental as it handles all 3 methods uniformly
+            res_method, msg, chapters, metadata, cover_info = open_book_experimental(
+                file_path, 
+                ui_callback_for_path_selection=self._ask_user_for_calibre_path_generic,
+                method=method
+            )
 
-            ebooklib_chapters = find_document_chapters_and_extract_texts(book)
-            document_chapters = []
-            for i, ch in enumerate(ebooklib_chapters):
-                document_chapters.append({
-                    'title': ch.get_name(),
-                    'extracted_text': getattr(ch, 'extracted_text', ''),
-                    'chapter_index': i
-                })
+            if not chapters:
+                print(f"Failed to load chapters: {msg}")
+                return
+
+            title = metadata.get('title', [Path(file_path).stem])[0]
+            author = metadata.get('creator', ['Unknown Author'])[0]
             
-            cover = find_cover(book)
-            
+            # Update UI in main thread
             self.after(0, lambda: self._load_book_data_into_ui(
                 title=title,
                 author=author,
-                chapters=document_chapters,
-                cover={'type': 'epub_cover', 'content': cover.content} if cover else None
+                chapters=chapters,
+                cover=cover_info
             ))
-            
+            print(f"Loaded: {title} with method {res_method}")
+
         except Exception as e:
             print(f"Error loading EPUB: {e}")
+            traceback.print_exc()
 
     def on_open_with_calibre(self):
         file_path = ctk.filedialog.askopenfilename(filetypes=[("Ebook files", "*.epub;*.mobi;*.azw;*.azw3;*.fb2;*.lit;*.pdf"), ("All files", "*.*")])
         if file_path:
             self.selected_file_path = file_path
-            # We don't know the method yet until _load_with_calibre finishes
-            threading.Thread(target=self._load_with_calibre, args=(file_path,), daemon=True).start()
+            # For Calibre button, we default to Calibre Only (method 3)
+            threading.Thread(target=self._load_book_file_threaded, args=(file_path,), kwargs={'method': 3}, daemon=True).start()
 
-    def _load_with_calibre(self, file_path):
-        from audiblez.calibre_handler import open_book_experimental
-        from types import SimpleNamespace
-
-        result, result_desc, chapters, metadata, cover_info = open_book_experimental(file_path, self._ask_user_for_calibre_path_generic)
-        
-        if not chapters:
-            print(f"Failed to open book with Calibre: {result_desc}")
-            return
-
-        self.current_parsing_method = result - 1
-
-        document_chapters = []
-        for i, chapter_data in enumerate(chapters):
-            chapter_obj = {
-                'title': chapter_data.get('title', f"Chapter {i+1}"),
-                'extracted_text': chapter_data.get('extracted_text', ''),
-                'chapter_index': i
-            }
-            document_chapters.append(chapter_obj)
-
-        book_title = "Unknown Title"
-        book_author = "Unknown Author"
-        if isinstance(metadata, dict):
-            book_title = metadata.get('title', ["Unknown Title"])[0]
-            book_author = metadata.get('creator', ["Unknown Author"])[0]
-
-        self.after(0, lambda: self._load_book_data_into_ui(
-            title=book_title,
-            author=book_author,
-            chapters=document_chapters,
-            cover=cover_info
-        ))
 
     def _ask_user_for_calibre_path_generic(self):
         # In CTK we could use a simple message box then dir dialog
