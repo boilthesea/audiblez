@@ -94,7 +94,15 @@ class AudiblezApp(ctk.CTk):
             meta_creator = book.get_metadata('DC', 'creator')
             author = meta_creator[0][0] if meta_creator else 'Unknown Author'
 
-            document_chapters = find_document_chapters_and_extract_texts(book)
+            ebooklib_chapters = find_document_chapters_and_extract_texts(book)
+            document_chapters = []
+            for i, ch in enumerate(ebooklib_chapters):
+                document_chapters.append({
+                    'title': ch.get_name(),
+                    'extracted_text': getattr(ch, 'extracted_text', ''),
+                    'chapter_index': i
+                })
+            
             cover = find_cover(book)
             
             self.after(0, lambda: self._load_book_data_into_ui(
@@ -168,8 +176,6 @@ class AudiblezApp(ctk.CTk):
         # Update Chapters Tab
         self.chapters_tab.load_chapters(chapters)
         
-        # Enable components
-        self.main_container.configure(state="normal")
         print(f"UI Updated for: {title}")
 
     def start_synthesis(self):
