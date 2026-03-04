@@ -11,20 +11,21 @@ class ChaptersTab(ctk.CTkFrame):
         super().__init__(parent)
         self.controller = controller
         
+        # Main Layout: Just the chapter list
+        # We remove column 1 expansion and the preview_frame
         self.grid_columnconfigure(0, weight=1)
-        self.grid_columnconfigure(1, weight=2)
         self.grid_rowconfigure(0, weight=1)
 
-        # Left: Chapter List
+        # Chapter List Frame (now fills the whole area)
         self.list_frame = ctk.CTkFrame(self)
-        self.list_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
+        self.list_frame.grid(row=0, column=0, sticky="nsew", padx=0)
         self.list_frame.grid_rowconfigure(3, weight=1)
         self.list_frame.grid_columnconfigure(0, weight=1)
 
         self.list_label = ctk.CTkLabel(self.list_frame, text="Chapters", font=("Inter", 14, "bold"))
         self.list_label.grid(row=0, column=0, sticky="nw", padx=10, pady=(5, 2))
 
-        # Parser selection - matching legacy UX
+        # Parser selection
         self.parser_frame = ctk.CTkFrame(self.list_frame, fg_color="transparent")
         self.parser_frame.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 2))
         
@@ -35,7 +36,6 @@ class ChaptersTab(ctk.CTkFrame):
             values=["Standard", "Zip", "Calibre Only"],
             command=self.on_parser_change
         )
-        # Map current_parsing_method (1,2,3) to values
         initial_val = "Standard"
         if self.controller.current_parsing_method == 2: initial_val = "Zip"
         if self.controller.current_parsing_method == 3: initial_val = "Calibre Only"
@@ -53,30 +53,9 @@ class ChaptersTab(ctk.CTkFrame):
 
         self.scroll_frame = ctk.CTkScrollableFrame(self.list_frame)
         self.scroll_frame.grid(row=3, column=0, sticky="nsew", padx=5, pady=(0, 5))
-        self.list_frame.grid_rowconfigure(3, weight=1)
 
-        # Right: Text Preview & Edit
-        self.preview_frame = ctk.CTkFrame(self)
-        self.preview_frame.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
-        self.preview_frame.grid_rowconfigure(1, weight=1)
-        self.preview_frame.grid_columnconfigure(0, weight=1)
-
-        self.preview_top = ctk.CTkFrame(self.preview_frame, fg_color="transparent")
-        self.preview_top.grid(row=0, column=0, sticky="ew", padx=10, pady=5)
-
-        self.chapter_title_label = ctk.CTkLabel(self.preview_top, text="No Chapter Selected", font=("Inter", 12, "italic"))
-        self.chapter_title_label.pack(side="left")
-
-        self.preview_audio_btn = ctk.CTkButton(self.preview_top, text="🔊 Audio Preview", width=120, command=self.on_audio_preview)
-        self.preview_audio_btn.pack(side="right")
-
-        self.text_area = ctk.CTkTextbox(self.preview_frame, font=("Courier New", 14))
-        self.text_area.grid(row=1, column=0, sticky="nsew", padx=10, pady=5)
-
-        self.staging_btn = ctk.CTkButton(self.preview_frame, text="📥 Stage Book for Batching", command=self.on_stage)
-        self.staging_btn.grid(row=2, column=0, sticky="ew", padx=10, pady=10)
-
-        self.preview_threads = []
+        self.staging_btn = ctk.CTkButton(self.list_frame, text="📥 Stage Book for Batching", command=self.on_stage)
+        self.staging_btn.grid(row=4, column=0, sticky="ew", padx=10, pady=10)
 
     def on_parser_change(self, value):
         mapping = {"Standard": 1, "Zip": 2, "Calibre Only": 3}
@@ -137,47 +116,9 @@ class ChaptersTab(ctk.CTkFrame):
 
     def on_chapter_select(self, chapter):
         self.selected_chapter = chapter
-        self.chapter_title_label.configure(text=chapter.get('title', 'Untitled'))
-        self.text_area.delete("1.0", "end")
-        self.text_area.insert("1.0", chapter.get('extracted_text', ''))
-
-    def on_audio_preview(self):
-        text = self.text_area.get("1.0", f"1.0 + {PREVIEW_LIMIT}c")
-        if not text.strip():
-            return
-
-        self.preview_audio_btn.configure(text="⏳", state="disabled")
-
-        def generate_preview():
-            try:
-                import audiblez.core as core
-                from kokoro import KPipeline
-                
-                # Get settings from controller/params
-                voice_tuple = self.controller.params.voice_var.get().split(' ')[1:] # Remove flag
-                voice = " ".join(voice_tuple)
-                speed = float(self.controller.params.speed_var.get())
-                engine = self.controller.params.engine_var.get()
-                
-                pipeline = KPipeline(lang_code=voice[0], device=engine) # Rough mapping
-                core.load_spacy()
-                
-                audio_segments = core.gen_audio_segments(pipeline, text, voice=voice, speed=speed)
-                if not audio_segments:
-                    return
-                
-                final_audio = np.concatenate(audio_segments)
-                with NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
-                    soundfile.write(tmp.name, final_audio, core.sample_rate)
-                    subprocess.run(['ffplay', '-autoexit', '-nodisp', tmp.name])
-            except Exception as e:
-                print(f"Preview error: {e}")
-            finally:
-                self.preview_audio_btn.configure(text="🔊 Audio Preview", state="normal")
-
-        thread = threading.Thread(target=generate_preview)
-        thread.start()
-        self.preview_threads.append(thread)
+        # Notify controller so it can update the PreviewPanel
+        if hasattr(self.controller, 'on_chapter_selected'):
+            self.controller.on_chapter_selected(chapter)
 
     def on_stage(self):
         if not hasattr(self.controller, 'current_book'):
@@ -200,9 +141,12 @@ class ChaptersTab(ctk.CTkFrame):
         db.add_staged_book(
             title=book['title'],
             author=book['author'],
-            source_path="N/A", # Path needs to be tracked properly if needed
+            source_path="N/A", 
             output_folder=self.controller.params.output_path.get() or ".",
             chapters=selected_chapters
         )
         print(f"Staged: {book['title']}")
-        self.controller.staging_tab.refresh_staging()
+        # Notification will be handled by controller if needed, or staging_tab directly
+        if hasattr(self.controller, 'staging_tab'):
+            self.controller.staging_tab.refresh_staging()
+

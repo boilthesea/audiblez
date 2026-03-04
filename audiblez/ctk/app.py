@@ -9,6 +9,7 @@ from audiblez.ctk.tabs.queue import QueueTab
 from audiblez.ctk.panels.book_details import BookDetailsPanel
 from audiblez.ctk.panels.params import ParamsPanel
 from audiblez.ctk.panels.synthesis import SynthesisPanel
+from audiblez.ctk.panels.preview import PreviewPanel
 
 class AudiblezApp(ctk.CTk):
     def __init__(self):
@@ -45,16 +46,43 @@ class AudiblezApp(ctk.CTk):
         self.about_btn = ctk.CTkButton(self.top_bar, text="ℹ️ About", width=80, command=self.on_about)
         self.about_btn.pack(side="right", padx=10, pady=10)
 
-        # Main Splitter replacement
+        # Main 3-Column Container
         self.main_container = ctk.CTkFrame(self, corner_radius=0)
         self.main_container.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
-        self.main_container.grid_columnconfigure(0, weight=4) # Left: Tabs
-        self.main_container.grid_columnconfigure(1, weight=1) # Right: Panels
+        
+        # Column 0: Metadata/Params (Left)
+        # Column 1: Tabs (Middle)
+        # Column 2: Preview (Right) - Expandable
+        self.main_container.grid_columnconfigure(0, weight=0, minsize=350) 
+        self.main_container.grid_columnconfigure(1, weight=0, minsize=400) 
+        self.main_container.grid_columnconfigure(2, weight=1) 
         self.main_container.grid_rowconfigure(0, weight=1)
 
-        # Left Side: Notebook (Tabs)
-        self.tab_view = ctk.CTkTabview(self.main_container)
-        self.tab_view.grid(row=0, column=0, sticky="nsew", padx=(0, 5))
+        # Column 0: Left Side Panels
+        self.left_container = ctk.CTkFrame(self.main_container, fg_color="transparent")
+        self.left_container.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        self.left_container.grid_rowconfigure(0, weight=0) # Details
+        self.left_container.grid_rowconfigure(1, weight=0) # Params
+        self.left_container.grid_rowconfigure(2, weight=0) # Synthesis
+        self.left_container.grid_rowconfigure(3, weight=1) # Spacer
+
+        self.book_details = BookDetailsPanel(self.left_container, self)
+        self.book_details.grid(row=0, column=0, sticky="nsew", pady=(0, 5))
+
+        self.params = ParamsPanel(self.left_container, self)
+        self.params.grid(row=1, column=0, sticky="nsew", pady=5)
+
+        self.synthesis = SynthesisPanel(self.left_container, self)
+        self.synthesis.grid(row=2, column=0, sticky="new", pady=(5, 0))
+
+        # Column 1: Middle Side (Notebook/Tabs)
+        self.tab_container = ctk.CTkFrame(self.main_container, fg_color="transparent")
+        self.tab_container.grid(row=0, column=1, sticky="nsew", padx=0)
+        self.tab_container.grid_columnconfigure(0, weight=1)
+        self.tab_container.grid_rowconfigure(0, weight=1)
+
+        self.tab_view = ctk.CTkTabview(self.tab_container)
+        self.tab_view.grid(row=0, column=0, sticky="nsew")
         
         self.chapters_tab = ChaptersTab(self.tab_view.add("Chapters"), self)
         self.chapters_tab.pack(expand=True, fill="both")
@@ -65,22 +93,9 @@ class AudiblezApp(ctk.CTk):
         self.queue_tab = QueueTab(self.tab_view.add("Queue"), self)
         self.queue_tab.pack(expand=True, fill="both")
 
-        # Right Side: Panels
-        self.right_container = ctk.CTkFrame(self.main_container, fg_color="transparent")
-        self.right_container.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
-        self.right_container.grid_rowconfigure(0, weight=0) # Details
-        self.right_container.grid_rowconfigure(1, weight=0) # Params
-        self.right_container.grid_rowconfigure(2, weight=0) # Synthesis
-        self.right_container.grid_rowconfigure(3, weight=1) # Spacer to push everything up
-
-        self.book_details = BookDetailsPanel(self.right_container, self)
-        self.book_details.grid(row=0, column=0, sticky="nsew", pady=(0, 5))
-
-        self.params = ParamsPanel(self.right_container, self)
-        self.params.grid(row=1, column=0, sticky="nsew", pady=5)
-
-        self.synthesis = SynthesisPanel(self.right_container, self)
-        self.synthesis.grid(row=2, column=0, sticky="new", pady=(5, 0))
+        # Column 2: Right Side (Preview)
+        self.preview = PreviewPanel(self.main_container, self)
+        self.preview.grid(row=0, column=2, sticky="nsew", padx=(10, 0))
 
     def on_open_epub(self):
         file_path = ctk.filedialog.askopenfilename(filetypes=[("EPUB Files", "*.epub")])
@@ -168,6 +183,11 @@ class AudiblezApp(ctk.CTk):
         
         print(f"UI Updated for: {title}")
 
+    def on_chapter_selected(self, chapter):
+        # Callback from ChaptersTab
+        if hasattr(self, 'preview'):
+            self.preview.set_chapter(chapter)
+
     def update_stats(self):
         if hasattr(self, 'current_book'):
             chapters = self.current_book['chapters']
@@ -182,7 +202,10 @@ class AudiblezApp(ctk.CTk):
         from audiblez.ctk.core_thread import CoreThread
         
         # Prepare parameters
-        voice = self.params.voice_var.get().split(' ')[1] # Just the voice name
+        voice_data = self.params.voice_var.get().split(' ')
+        # Handle potential flag in first index
+        voice = " ".join(voice_data[1:]) if len(voice_data) > 1 else voice_data[0]
+        
         params = {
             'file_path': self.selected_file_path,
             'voice': voice,
@@ -211,7 +234,6 @@ class AudiblezApp(ctk.CTk):
 
     def on_about(self):
         msg = "Audiblez CTK UI\nA modern, dark-mode-only interface for generating audiobooks."
-        dialog = ctk.CTkEntry(self, placeholder_text=msg)
         # Using a simple Toplevel for About
         top = ctk.CTkToplevel(self)
         top.title("About Audiblez")
