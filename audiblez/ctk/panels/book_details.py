@@ -25,6 +25,7 @@ class BookDetailsPanel(ctk.CTkFrame):
         self.content.grid_rowconfigure(1, weight=0)
         self.content.grid_rowconfigure(2, weight=0)
         self.content.grid_rowconfigure(3, weight=0)
+        self.content.grid_rowconfigure(4, weight=0)
         self.content.grid_rowconfigure(5, weight=1) # Spacer row
 
         # Cover Image Placeholder

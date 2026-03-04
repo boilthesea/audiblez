@@ -48,7 +48,7 @@ class AudiblezApp(ctk.CTk):
         # Main Splitter replacement
         self.main_container = ctk.CTkFrame(self, corner_radius=0)
         self.main_container.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
-        self.main_container.grid_columnconfigure(0, weight=3) # Left: Tabs
+        self.main_container.grid_columnconfigure(0, weight=4) # Left: Tabs
         self.main_container.grid_columnconfigure(1, weight=1) # Right: Panels
         self.main_container.grid_rowconfigure(0, weight=1)
 
@@ -68,9 +68,10 @@ class AudiblezApp(ctk.CTk):
         # Right Side: Panels
         self.right_container = ctk.CTkFrame(self.main_container, fg_color="transparent")
         self.right_container.grid(row=0, column=1, sticky="nsew", padx=(5, 0))
-        self.right_container.grid_rowconfigure(0, weight=1) # Details
-        self.right_container.grid_rowconfigure(1, weight=1) # Params
+        self.right_container.grid_rowconfigure(0, weight=0) # Details
+        self.right_container.grid_rowconfigure(1, weight=0) # Params
         self.right_container.grid_rowconfigure(2, weight=0) # Synthesis
+        self.right_container.grid_rowconfigure(3, weight=1) # Spacer to push everything up
 
         self.book_details = BookDetailsPanel(self.right_container, self)
         self.book_details.grid(row=0, column=0, sticky="nsew", pady=(0, 5))
