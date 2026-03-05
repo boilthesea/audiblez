@@ -55,7 +55,10 @@ class ChaptersTab(ctk.CTkFrame):
         self.scroll_frame.grid(row=3, column=0, sticky="nsew", padx=5, pady=(0, 5))
 
         self.staging_btn = ctk.CTkButton(self.list_frame, text="📥 Stage Book for Batching", command=self.on_stage)
-        self.staging_btn.grid(row=4, column=0, sticky="ew", padx=10, pady=10)
+        self.staging_btn.grid(row=4, column=0, sticky="ew", padx=10, pady=(10, 5))
+
+        self.queue_btn = ctk.CTkButton(self.list_frame, text="⏩ Queue All Selected (Skip Staging)", command=self.on_queue)
+        self.queue_btn.grid(row=5, column=0, sticky="ew", padx=10, pady=(5, 10))
 
     def on_parser_change(self, value):
         mapping = {"Standard": 1, "Zip": 2, "Calibre Only": 3}
@@ -149,4 +152,66 @@ class ChaptersTab(ctk.CTkFrame):
         # Notification will be handled by controller if needed, or staging_tab directly
         if hasattr(self.controller, 'staging_tab'):
             self.controller.staging_tab.refresh_staging()
+
+    def on_queue(self):
+        if not hasattr(self.controller, 'current_book'):
+            print("No book loaded.")
+            return
+
+        import audiblez.database as db
+        book = self.controller.current_book
+        
+        # Filter selected chapters
+        selected_chapters = []
+        for i, chap in enumerate(self.chapters):
+            if self.chapter_vars[i].get():
+                selected_chapters.append(chap)
+        
+        if not selected_chapters:
+            print("No chapters selected.")
+            return
+
+        # Prepare synthesis settings
+        voice = self.controller.params.voice_var.get()
+        speed = self.controller.params.speed_var.get()
+        engine = self.controller.params.engine_var.get()
+        output_folder = self.controller.params.output_path.get() or "."
+        m4b_method = self.controller.params.m4b_var.get()
+
+        synthesis_settings = {
+            'engine': engine,
+            'voice': voice,
+            'speed': speed,
+            'output_folder': output_folder,
+            'm4b_assembly_method': m4b_method
+        }
+
+        # Prepare chapters for DB
+        final_chapters_for_db = []
+        for idx, chap in enumerate(selected_chapters):
+            final_chapters_for_db.append({
+                'staged_chapter_id': None,
+                'title': chap.get('title', f"Chapter {idx+1}"),
+                'text_content': chap.get('extracted_text', ''),
+                'order': idx
+            })
+
+        db_queue_details = {
+            'staged_book_id': None,
+            'book_title': book['title'],
+            'source_path': self.controller.selected_file_path or "N/A",
+            'synthesis_settings': synthesis_settings,
+            'chapters': final_chapters_for_db
+        }
+
+        new_item_id = db.add_item_to_queue(db_queue_details)
+        if new_item_id:
+            print(f"Added to Queue: {book['title']}")
+            if hasattr(self.controller, 'queue_tab'):
+                self.controller.queue_tab.refresh_queue()
+            # Switch to Queue tab
+            if hasattr(self.controller, 'tab_view'):
+                self.controller.tab_view.set("Queue")
+        else:
+            print("Failed to add to queue.")
 
