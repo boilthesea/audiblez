@@ -2,19 +2,22 @@
 
 [![GitHub Repo](https://img.shields.io/badge/GitHub-Repo-blue?style=flat-square&logo=github)](https://github.com/boilthesea/audiblez)
 
+![Audiblez CustomTkinter UI](./imgs/ctk_ui1.png)
+
 This is a specialized fork of [Claudio Santini's Audiblez](https://github.com/santinic/audiblez), optimized for Windows environments with significant architecture improvements and feature additions.
 
 ### ✨ Key Enhancements in this Fork
 
 - 🌓 **Modern CustomTkinter UI**: A sleek, dark-mode-only interface with modular design.
-- 🍗 **Extra Crunchy M4B Assembly**: Improved Windows-specific FFmpeg concatenation for more robust audiobook generation.
+- 📚 **Calibre Integration**: You can now choose between python's ebooklib and calibre to open your ebooks.
+- 🍗 **Extra Crunchy M4B Assembly**: Improved Windows-specific FFmpeg concatenation for more robust audiobook generation or you can optionally use the original Audiblez M4B assembly.
 - 📚 **Advanced Parsing**: Enhanced EPUB chapter detection with three experimental methods (Standard, Zip, **Calibre-Only**).
 - 🗄️ **Persistent Settings**: SQLite-backed database for user preferences, book staging, and a synthesis queue, with multi-UI support.
 - ⚡ **Expanded Engines**: Built-in support for **Qwen3-TTS** alongside the original Kokoro-82M, with CPU/CUDA selection.
 - 🛠️ **Windows Stability**: Fixed numerous pathing and process-locking issues common on Windows systems.
 - 🔊 **Audio Preview**: Generate and hear a snippet of any chapter before starting the full conversion.
 - 🔍 **Inspector Debugging**: Generate HTML skeleton reports to debug EPUB parsing issues.
-- 📊 **Better UX**: Improved progress estimation and multi-file queue management.
+- 📊 **Better UX**: Improved layout, progress estimation and multi-file queue management.
 
 ---
 

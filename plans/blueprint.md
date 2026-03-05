@@ -24,7 +24,6 @@ The application follows a modular "Engine" pattern, allowing different TTS backe
 
 - **[cli.py](file:///s:/Files/nexus/http/audiblez/audiblez/cli.py)**: Entry point for the Command Line Interface. Handles argument parsing and execution flow.
 - **[ui.py](file:///s:/Files/nexus/http/audiblez/audiblez/ui.py)**: Modern **CustomTkinter** GUI entry point. Now the primary interface.
-- **[ui_wx.py](file:///s:/Files/nexus/http/audiblez/audiblez/ui_wx.py)**: Legacy wxPython GUI implementation. Maintained for compatibility.
 - **[ctk/](file:///s:/Files/nexus/http/audiblez/audiblez/ctk/)**: Modular components for the modern UI (tabs, panels, custom widgets).
 - **[database.py](file:///s:/Files/nexus/http/audiblez/audiblez/database.py)**: SQLite integration. Enhanced to support isolated settings for different UIs (`ui_name` key) and persistent output folders.
 
