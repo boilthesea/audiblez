@@ -73,10 +73,24 @@ def set_espeak_library():
         print("On Linux: sudo apt install espeak-ng")
 
 
+def _get_chapter_text(c):
+    """Helper to safely get text from either a dict or an object."""
+    if isinstance(c, dict):
+        return c.get('extracted_text', '')
+    return getattr(c, 'extracted_text', '')
+
+def _get_chapter_title(c, fallback="chapter"):
+    """Helper to safely get title from either a dict or an object."""
+    if isinstance(c, dict):
+        return c.get('title') or fallback
+    if hasattr(c, 'get_name') and callable(c.get_name):
+        return c.get_name()
+    return getattr(c, 'title', fallback)
+
 def main(file_path, voice, pick_manually, speed, output_folder='.',
          max_chapters=None, max_sentences=None, selected_chapters=None, post_event=None,
          calibre_metadata: dict | None = None, calibre_cover_image_path: str | None = None,
-         m4b_assembly_method: str = 'original'):
+         m4b_assembly_method: str = 'original', engine=None):
     if post_event: post_event('CORE_STARTED')
     load_spacy()
     if output_folder != '.':
@@ -147,7 +161,7 @@ def main(file_path, voice, pick_manually, speed, output_folder='.',
         if post_event: post_event('CORE_FINISHED', error_message="No chapters selected.")
         return
     print_selected_chapters(document_chapters, selected_chapters)
-    texts = [c.extracted_text for c in selected_chapters]
+    texts = [_get_chapter_text(c) for c in selected_chapters]
 
     has_ffmpeg = shutil.which('ffmpeg') is not None
     if not has_ffmpeg:
@@ -182,19 +196,15 @@ def main(file_path, voice, pick_manually, speed, output_folder='.',
     eta = strfdelta((stats.total_chars - stats.processed_chars) / stats.chars_per_sec)
     print(f'Estimated time remaining (assuming {stats.chars_per_sec} chars/sec): {eta}')
     set_espeak_library()
-    pipeline = KPipeline(lang_code=voice[0])  # a for american or b for british etc.
+    pipeline = KPipeline(lang_code=voice[0], device=engine)  # a for american or b for british etc.
 
     chapter_wav_files = []
     for i, chapter in enumerate(selected_chapters, start=1):
         if max_chapters and i > max_chapters: break
-        text = chapter.extracted_text
-        # Use chapter.title if get_name() is not available (for ChapterForCore objects from queue or Calibre)
-        if hasattr(chapter, 'get_name') and callable(chapter.get_name): # For EPUB chapters
-            original_name = chapter.get_name()
-        elif hasattr(chapter, 'title') and chapter.title: # For Calibre SimpleNamespace chapters or queued chapters
-            original_name = chapter.title
-        else:
-            original_name = f"chapter_{i}" # Fallback if neither is present
+        # Access attributes safely as chapter might be a dict (from CTK UI) or an object (EpubHtml/SimpleNamespace)
+        text = _get_chapter_text(chapter)
+        original_name = _get_chapter_title(chapter, fallback=f"chapter_{i}")
+        chapter_index = chapter.get('chapter_index', i - 1) if isinstance(chapter, dict) else getattr(chapter, 'chapter_index', i - 1)
 
         # Sanitize original_name for use in filename
         # Replace common problematic characters, limit length
@@ -227,7 +237,7 @@ def main(file_path, voice, pick_manually, speed, output_folder='.',
             # Note: stats.processed_chars here will use original text length if we don't update 'text' var earlier
             stats.processed_chars += len(text) # Original text length for skip consistency
             if post_event:
-                post_event('CORE_CHAPTER_FINISHED', chapter_index=chapter.chapter_index)
+                post_event('CORE_CHAPTER_FINISHED', chapter_index=chapter_index)
             continue
 
         # Use filtered text for length check and processing
@@ -239,7 +249,7 @@ def main(file_path, voice, pick_manually, speed, output_folder='.',
             continue
 
         start_time = time.time()
-        if post_event: post_event('CORE_CHAPTER_STARTED', chapter_index=chapter.chapter_index)
+        if post_event: post_event('CORE_CHAPTER_STARTED', chapter_index=chapter_index)
         audio_segments = gen_audio_segments(
             pipeline, filtered_text, voice, speed, stats, post_event=post_event, max_sentences=max_sentences)
         if audio_segments:
@@ -249,7 +259,7 @@ def main(file_path, voice, pick_manually, speed, output_folder='.',
             delta_seconds = end_time - start_time
             chars_per_sec = len(text) / delta_seconds
             print('Chapter written to', chapter_wav_path)
-            if post_event: post_event('CORE_CHAPTER_FINISHED', chapter_index=chapter.chapter_index)
+            if post_event: post_event('CORE_CHAPTER_FINISHED', chapter_index=chapter_index)
             print(f'Chapter {i} read in {delta_seconds:.2f} seconds ({chars_per_sec:.0f} characters per second)')
         else:
             print(f'Warning: No audio generated for chapter {i}')
@@ -290,7 +300,7 @@ def find_cover(book):
 def print_selected_chapters(document_chapters, chapters):
     ok = 'X' if platform.system() == 'Windows' else '✅'
     print(tabulate([
-        [i, c.get_name(), len(c.extracted_text), ok if c in chapters else '', chapter_beginning_one_liner(c)]
+        [i, _get_chapter_title(c), len(_get_chapter_text(c)), ok if c in chapters else '', chapter_beginning_one_liner(c)]
         for i, c in enumerate(document_chapters, start=1)
     ], headers=['#', 'Chapter', 'Text Length', 'Selected', 'First words']))
 
@@ -319,9 +329,9 @@ def gen_audio_segments(pipeline, text, voice, speed, stats=None, max_sentences=N
     return audio_segments
 
 
-def gen_text(text, voice='af_heart', output_file='text.wav', speed=1, play=False):
+def gen_text(text, voice='af_heart', output_file='text.wav', speed=1, play=False, engine=None):
     lang_code = voice[:1]
-    pipeline = KPipeline(lang_code=lang_code)
+    pipeline = KPipeline(lang_code=lang_code, device=engine)
     load_spacy()
     audio_segments = gen_audio_segments(pipeline, text, voice=voice, speed=speed);
     final_audio = np.concatenate(audio_segments)
@@ -357,8 +367,8 @@ def find_document_chapters_and_extract_texts(book, include_skeleton=False):
 
 
 def is_chapter(c):
-    name = c.get_name().lower()
-    has_min_len = len(c.extracted_text) > 100
+    name = _get_chapter_title(c).lower()
+    has_min_len = len(_get_chapter_text(c)) > 100
     title_looks_like_chapter = bool(
         'chapter' in name.lower()
         or re.search(r'part_?\d{1,3}', name)
@@ -370,7 +380,8 @@ def is_chapter(c):
 
 
 def chapter_beginning_one_liner(c, chars=20):
-    s = c.extracted_text[:chars].strip().replace('\n', ' ').replace('\r', ' ')
+    text = _get_chapter_text(c)
+    s = text[:chars].strip().replace('\n', ' ').replace('\r', ' ')
     return s + '…' if len(s) > 0 else ''
 
 
@@ -378,14 +389,14 @@ def find_good_chapters(document_chapters):
     chapters = [c for c in document_chapters if c.get_type() == ebooklib.ITEM_DOCUMENT and is_chapter(c)]
     if len(chapters) == 0:
         print('Not easy to recognize the chapters, defaulting to all non-empty documents.')
-        chapters = [c for c in document_chapters if c.get_type() == ebooklib.ITEM_DOCUMENT and len(c.extracted_text) > 10]
+        chapters = [c for c in document_chapters if c.get_type() == ebooklib.ITEM_DOCUMENT and len(_get_chapter_text(c)) > 10]
     return chapters
 
 
 def pick_chapters(chapters):
     # Display the document name, the length and first 50 characters of the text
     chapters_by_names = {
-        f'{c.get_name()}\t({len(c.extracted_text)} chars)\t[{chapter_beginning_one_liner(c, 50)}]': c
+        f'{_get_chapter_title(c)}\t({len(_get_chapter_text(c))} chars)\t[{chapter_beginning_one_liner(c, 50)}]': c
         for c in chapters}
     title = 'Select which chapters to read in the audiobook'
     ret = pick(list(chapters_by_names.keys()), title, multiselect=True, min_selection_count=1)

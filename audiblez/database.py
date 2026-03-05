@@ -40,7 +40,7 @@ def create_tables(conn: sqlite3.Connection):
     # User Settings Table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS user_settings (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ui_name TEXT DEFAULT 'wx',
             engine TEXT,
             voice TEXT,
             speed REAL,
@@ -49,10 +49,25 @@ def create_tables(conn: sqlite3.Connection):
             calibre_ebook_convert_path TEXT, -- Stores path to ebook-convert
             m4b_assembly_method TEXT,
             dark_mode TEXT,
-            window_geometry TEXT
+            window_geometry TEXT,
+            output_folder TEXT,
+            PRIMARY KEY (ui_name)
         )
     """)
 
+    # Check for ui_name column (backward compatibility)
+    try:
+        cursor.execute("ALTER TABLE user_settings ADD COLUMN ui_name TEXT DEFAULT 'wx'")
+    except sqlite3.OperationalError:
+        pass # Already exists
+
+    # Migrate existing data if needed (assuming id=1 was 'wx')
+    cursor.execute("UPDATE user_settings SET ui_name = 'wx' WHERE ui_name IS NULL")
+
+    # The id column is no longer needed if we use ui_name as PK, 
+    # but we'll keep it for minimal disruption if other things expect it, 
+    # though PK(ui_name) is better for our multi-UI goal.
+    
     # Add dark_mode column to user_settings if it doesn't exist for backward compatibility
     try:
         cursor.execute("ALTER TABLE user_settings ADD COLUMN dark_mode TEXT")
@@ -68,6 +83,15 @@ def create_tables(conn: sqlite3.Connection):
     except sqlite3.OperationalError as e:
         if "duplicate column name" in str(e).lower():
             pass  # Column already exists
+        else:
+            raise
+
+    # Add output_folder column
+    try:
+        cursor.execute("ALTER TABLE user_settings ADD COLUMN output_folder TEXT")
+    except sqlite3.OperationalError as e:
+        if "duplicate column name" in str(e).lower():
+            pass
         else:
             raise
 
@@ -136,44 +160,33 @@ def create_tables(conn: sqlite3.Connection):
 
     conn.commit()
 
-def save_user_setting(setting_name: str, setting_value):
+def save_user_setting(setting_name: str, setting_value, ui_name='wx'):
     """Saves a user setting to the database.
 
     Args:
         setting_name (str): The name of the setting (e.g., "engine", "voice").
         setting_value: The value of the setting.
+        ui_name (str): The name of the UI (e.g., 'wx', 'ctk').
     """
     conn = connect_db()
     cursor = conn.cursor()
     try:
-        # Check if a settings row exists (assuming id=1 for the single settings row)
-        cursor.execute("SELECT id FROM user_settings WHERE id = 1")
-        row = cursor.fetchone()
-
-        valid_columns = ["engine", "voice", "speed", "custom_rate", "next_scheduled_run", "calibre_ebook_convert_path", "m4b_assembly_method", "dark_mode", "window_geometry"]
+        valid_columns = ["engine", "voice", "speed", "custom_rate", "next_scheduled_run", "calibre_ebook_convert_path", "m4b_assembly_method", "dark_mode", "window_geometry", "output_folder"]
         if setting_name not in valid_columns:
             print(f"Error: Invalid setting_name '{setting_name}' for update/insert.")
-            return # Or raise an error
+            return
+
+        cursor.execute("SELECT ui_name FROM user_settings WHERE ui_name = ?", (ui_name,))
+        row = cursor.fetchone()
 
         if row:
             # Update existing row
-            cursor.execute(f"UPDATE user_settings SET {setting_name} = ? WHERE id = 1", (setting_value,))
+            cursor.execute(f"UPDATE user_settings SET {setting_name} = ? WHERE ui_name = ?", (setting_value, ui_name))
         else:
-            # Insert new row with id = 1
-            # Initialize all column values, setting the specified one and others to NULL
-            column_names_for_insert = ["id"] + valid_columns
-            value_placeholders = ["?"] * len(column_names_for_insert)
-
-            # Prepare the values tuple
-            values_for_insert = [1] # For id
-            for col in valid_columns:
-                if col == setting_name:
-                    values_for_insert.append(setting_value)
-                else:
-                    values_for_insert.append(None) # Other settings are NULL
-
-            sql = f"INSERT INTO user_settings ({', '.join(column_names_for_insert)}) VALUES ({', '.join(value_placeholders)})"
-            cursor.execute(sql, tuple(values_for_insert))
+            # Insert new row
+            column_names = ["ui_name", setting_name]
+            placeholders = ["?", "?"]
+            cursor.execute(f"INSERT INTO user_settings ({', '.join(column_names)}) VALUES ({', '.join(placeholders)})", (ui_name, setting_value))
 
         conn.commit()
     except sqlite3.Error as e:
@@ -181,11 +194,12 @@ def save_user_setting(setting_name: str, setting_value):
     finally:
         conn.close()
 
-def load_user_setting(setting_name: str):
+def load_user_setting(setting_name: str, ui_name='wx'):
     """Loads a specific user setting from the database.
 
     Args:
         setting_name (str): The name of the setting to load.
+        ui_name (str): The name of the UI.
 
     Returns:
         The value of the setting, or None if not found or an error occurs.
@@ -193,26 +207,24 @@ def load_user_setting(setting_name: str):
     conn = connect_db()
     cursor = conn.cursor()
     try:
-        valid_columns = ["engine", "voice", "speed", "custom_rate", "next_scheduled_run", "calibre_ebook_convert_path", "m4b_assembly_method", "dark_mode", "window_geometry", "id"] # id for validation
+        valid_columns = ["engine", "voice", "speed", "custom_rate", "next_scheduled_run", "calibre_ebook_convert_path", "m4b_assembly_method", "dark_mode", "window_geometry", "output_folder"]
         if setting_name not in valid_columns:
             print(f"Error: Invalid setting_name '{setting_name}' for load.")
-            # Pass to let SQLite handle "no such column" if it's truly an invalid/new column
-            # vs. a typo in a known one. UI/logic should ensure only valid names are passed.
-            pass
+            return None
 
-        cursor.execute(f"SELECT {setting_name} FROM user_settings WHERE id = 1")
+        cursor.execute(f"SELECT {setting_name} FROM user_settings WHERE ui_name = ?", (ui_name,))
         row = cursor.fetchone()
         if row:
             return row[0]
         return None
     except sqlite3.Error as e:
-        print(f"Database error in load_user_setting for '{setting_name}': {e}")
+        print(f"Database error in load_user_setting for '{setting_name}' ({ui_name}): {e}")
         return None
     finally:
         conn.close()
 
-def load_all_user_settings() -> dict:
-    """Loads all user settings from the database.
+def load_all_user_settings(ui_name='wx') -> dict:
+    """Loads all user settings from the database for a specific UI.
 
     Returns:
         A dictionary containing all settings, or an empty dictionary if no
@@ -222,8 +234,7 @@ def load_all_user_settings() -> dict:
     cursor = conn.cursor()
     settings = {}
     try:
-        # Assuming settings are in a single row with id = 1
-        cursor.execute("SELECT engine, voice, speed, custom_rate, next_scheduled_run, calibre_ebook_convert_path, m4b_assembly_method, dark_mode, window_geometry FROM user_settings WHERE id = 1")
+        cursor.execute("SELECT engine, voice, speed, custom_rate, next_scheduled_run, calibre_ebook_convert_path, m4b_assembly_method, dark_mode, window_geometry, output_folder FROM user_settings WHERE ui_name = ?", (ui_name,))
         row = cursor.fetchone()
         if row:
             settings = {
@@ -236,10 +247,11 @@ def load_all_user_settings() -> dict:
                 "m4b_assembly_method": row[6],
                 "dark_mode": row[7],
                 "window_geometry": row[8],
+                "output_folder": row[9],
             }
         return settings
     except sqlite3.Error as e:
-        print(f"Database error in load_all_user_settings: {e}")
+        print(f"Database error in load_all_user_settings ({ui_name}): {e}")
         return settings # Return empty settings dict on error
     finally:
         conn.close()

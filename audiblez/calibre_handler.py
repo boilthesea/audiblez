@@ -723,16 +723,13 @@ def extract_chapters_and_metadata_from_calibre_html(html_file_path: str, opf_fil
         # but chapters are delimited by h1/h2 in the flow of these tags.
         
         def create_chapter_object(title, text_content, index):
-            chapter_obj = SimpleNamespace()
-            chapter_obj.title = title # Used by core.main for file naming if get_name() not present
-            chapter_obj.short_name = title.replace('/', '_').replace('\\', '_') # For UI display & internal use
-            chapter_obj.extracted_text = text_content.strip()
-            chapter_obj.is_selected = True  # Default to selected
-            chapter_obj.chapter_index = index # For UI events and ordering
-            # Mimic EbookLib item methods if needed by other parts of the code, e.g. get_name()
-            chapter_obj.get_name = lambda: title # Simple mock
-            chapter_obj.get_type = lambda: "calibre_html_chapter" # Dummy type
-            return chapter_obj
+            return {
+                'title': title,
+                'short_name': title.replace('/', '_').replace('\\', '_'),
+                'extracted_text': text_content.strip(),
+                'is_selected': True,
+                'chapter_index': index
+            }
 
         # New chapter splitting logic using find_next_siblings to avoid duplication
         chapter_headings = content_body.find_all(['h1', 'h2'])
@@ -783,9 +780,9 @@ def extract_chapters_and_metadata_from_calibre_html(html_file_path: str, opf_fil
 
         # Deselect chapters with "gutenberg" in the title
         for chapter in chapters:
-            if 'gutenberg' in chapter.title.lower():
-                chapter.is_selected = False
-                print(f"Deselecting chapter '{chapter.title}' due to 'gutenberg' in title.")
+            if 'gutenberg' in chapter['title'].lower():
+                chapter['is_selected'] = False
+                print(f"Deselecting chapter '{chapter['title']}' due to 'gutenberg' in title.")
 
         return chapters, metadata
 
