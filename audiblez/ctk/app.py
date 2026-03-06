@@ -20,6 +20,10 @@ class AudiblezApp(ctk.CTk):
         self.selected_file_path = None
         self.current_parsing_method = 1 # 1: Standard, 2: Zip, 3: Calibre
         
+        # Queue state
+        self.queue_running = False
+        self.current_queue_item = None
+        
         # Window configuration
         self.title(APP_NAME)
         self.geometry(self.user_settings.get('window_geometry', f"{DEFAULT_WIDTH}x{DEFAULT_HEIGHT}"))
@@ -96,6 +100,9 @@ class AudiblezApp(ctk.CTk):
         # Column 2: Right Side (Preview)
         self.preview = PreviewPanel(self.main_container, self)
         self.preview.grid(row=0, column=2, sticky="nsew", padx=(10, 0))
+
+        # Start background tasks
+        self.after(5000, self.check_schedule)
 
     def on_open_epub(self):
         file_path = ctk.filedialog.askopenfilename(filetypes=[("EPUB Files", "*.epub")])
@@ -220,6 +227,65 @@ class AudiblezApp(ctk.CTk):
         self.synth_thread = CoreThread(params, self.handle_core_event)
         self.synth_thread.start()
 
+    def start_queue_processing(self):
+        if self.queue_running:
+            print("Queue already running.")
+            return
+
+        items = db.get_queued_items()
+        pending_item = next((i for i in items if i['status'] == 'pending'), None)
+
+        if pending_item:
+            self.queue_running = True
+            self.current_queue_item = pending_item
+            db.update_queue_item_status(pending_item['id'], 'in_progress')
+            self.after(0, self.queue_tab.refresh_queue)
+            self._run_queue_item(pending_item)
+        else:
+            self.queue_running = False
+            self.current_queue_item = None
+            print("No pending items in queue.")
+
+    def _run_queue_item(self, item):
+        from audiblez.ctk.core_thread import CoreThread
+        
+        settings = item['synthesis_settings']
+        
+        # Ensure chapters have extracted_text (populate from staged if needed)
+        selected_chapters = []
+        for chap in item['chapters']:
+            if not chap.get('text_content') and chap.get('staged_chapter_id'):
+                chap['text_content'] = db.get_chapter_text_content(chap['staged_chapter_id'])
+            
+            # core.py expects 'extracted_text' in the dict
+            chap['extracted_text'] = chap.get('text_content', '')
+            selected_chapters.append(chap)
+
+        params = {
+            'file_path': item['source_path'],
+            'voice': settings.get('voice'),
+            'pick_manually': False,
+            'speed': float(settings.get('speed', 1.0)),
+            'engine': settings.get('engine'),
+            'output_folder': settings.get('output_folder') or ".",
+            'selected_chapters': selected_chapters,
+            'm4b_assembly_method': settings.get('m4b_assembly_method', 'original')
+        }
+
+        self.synth_thread = CoreThread(params, self.handle_core_event)
+        self.synth_thread.start()
+
+    def check_schedule(self):
+        import time
+        scheduled_time = db.load_schedule_time()
+        if scheduled_time and time.time() >= scheduled_time:
+            print(f"Scheduled run triggered at {time.ctime(time.time())}")
+            db.save_schedule_time(None) # Clear schedule
+            self.start_queue_processing()
+        
+        # Check again in 60 seconds
+        self.after(60000, self.check_schedule)
+
     def handle_core_event(self, event_name, **kwargs):
         if event_name == 'CORE_PROGRESS':
             stats = kwargs.get('stats')
@@ -228,9 +294,23 @@ class AudiblezApp(ctk.CTk):
         elif event_name == 'CORE_FINISHED':
             self.after(0, lambda: self.synthesis.update_progress(100, "Done"))
             print("Synthesis Finished")
+            
+            if self.queue_running and self.current_queue_item:
+                db.update_queue_item_status(self.current_queue_item['id'], 'completed')
+                self.queue_running = False # Reset before starting next
+                self.after(0, self.queue_tab.refresh_queue)
+                self.after(1000, self.start_queue_processing)
+
         elif event_name == 'error':
             error_msg = kwargs.get('error_message', 'Unknown Error')
             print(f"Core Error: {error_msg}")
+            
+            if self.queue_running and self.current_queue_item:
+                db.update_queue_item_status(self.current_queue_item['id'], 'error')
+                self.queue_running = False
+                self.after(0, self.queue_tab.refresh_queue)
+                # Still try to process next item
+                self.after(1000, self.start_queue_processing)
 
     def on_about(self):
         msg = "Audiblez CTK UI\nA modern, dark-mode-only interface for generating audiobooks."

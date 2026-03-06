@@ -47,12 +47,72 @@ class QueueTab(ctk.CTkFrame):
 
     def on_run_queue(self):
         # Implementation for running the queue
-        pass
+        self.controller.start_queue_processing()
 
     def on_schedule(self):
         # Implementation for scheduling queue run
-        pass
+        ScheduleDialog(self, self.controller)
 
     def remove_item(self, item):
         db.remove_queue_item(item['id'])
         self.refresh_queue()
+
+class ScheduleDialog(ctk.CTkToplevel):
+    def __init__(self, parent, controller):
+        super().__init__(parent)
+        self.controller = controller
+        self.title("Schedule Queue Run")
+        self.geometry("400x300")
+        
+        # Make it modal-ish
+        self.after(10, self.grab_set)
+        
+        self.grid_columnconfigure(0, weight=1)
+        
+        ctk.CTkLabel(self, text="Schedule Queue Processing", font=("Inter", 16, "bold")).grid(row=0, column=0, pady=20)
+        
+        import datetime
+        now = datetime.datetime.now()
+        default_date = now.strftime("%Y-%m-%d")
+        # Default to 1 hour from now, rounded to nearest 10 mins
+        default_time = (now + datetime.timedelta(hours=1)).strftime("%H:%M")
+        
+        # Date Input
+        ctk.CTkLabel(self, text="Date (YYYY-MM-DD):").grid(row=1, column=0, sticky="w", padx=40)
+        self.date_entry = ctk.CTkEntry(self, placeholder_text="YYYY-MM-DD")
+        self.date_entry.insert(0, default_date)
+        self.date_entry.grid(row=2, column=0, sticky="ew", padx=40, pady=(0, 10))
+        
+        # Time Input
+        ctk.CTkLabel(self, text="Time (HH:MM):").grid(row=3, column=0, sticky="w", padx=40)
+        self.time_entry = ctk.CTkEntry(self, placeholder_text="HH:MM")
+        self.time_entry.insert(0, default_time)
+        self.time_entry.grid(row=4, column=0, sticky="ew", padx=40, pady=(0, 20))
+        
+        self.set_btn = ctk.CTkButton(self, text="Set Schedule", command=self.on_set)
+        self.set_btn.grid(row=5, column=0, pady=10)
+        
+        self.cancel_btn = ctk.CTkButton(self, text="Cancel", fg_color="transparent", border_width=1, command=self.destroy)
+        self.cancel_btn.grid(row=6, column=0, pady=5)
+
+    def on_set(self):
+        date_str = self.date_entry.get()
+        time_str = self.time_entry.get()
+        
+        try:
+            import datetime
+            import time
+            dt_str = f"{date_str} {time_str}"
+            dt = datetime.datetime.strptime(dt_str, "%Y-%m-%d %H:%M")
+            timestamp = time.mktime(dt.timetuple())
+            
+            if timestamp < time.time():
+                print("Warning: Scheduled time is in the past.")
+                # We'll allow it, it will just trigger on next check.
+            
+            db.save_schedule_time(int(timestamp))
+            print(f"Queue scheduled for {dt_str}")
+            self.destroy()
+        except ValueError:
+            print("Invalid date or time format.")
+            # We could add a label for error message here
