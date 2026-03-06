@@ -45,7 +45,10 @@ class StagingTab(ctk.CTkFrame):
         import json
         
         # Prepare settings
-        voice = self.controller.params.voice_var.get().split(' ')[1]
+        voice_raw = self.controller.params.voice_var.get()
+        voice_data = voice_raw.split(' ')
+        voice = " ".join(voice_data[1:]) if len(voice_data) > 1 else voice_data[0]
+        
         settings = {
             'voice': voice,
             'speed': float(self.controller.params.speed_var.get()),

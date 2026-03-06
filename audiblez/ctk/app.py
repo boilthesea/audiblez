@@ -261,9 +261,16 @@ class AudiblezApp(ctk.CTk):
             chap['extracted_text'] = chap.get('text_content', '')
             selected_chapters.append(chap)
 
+        # Bug Fix: Ensure voice is stripped of flag
+        voice_str = settings.get('voice', '')
+        if ' ' in voice_str:
+            voice = " ".join(voice_str.split(' ')[1:])
+        else:
+            voice = voice_str
+
         params = {
             'file_path': item['source_path'],
-            'voice': settings.get('voice'),
+            'voice': voice,
             'pick_manually': False,
             'speed': float(settings.get('speed', 1.0)),
             'engine': settings.get('engine'),

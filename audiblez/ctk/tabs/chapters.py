@@ -172,7 +172,11 @@ class ChaptersTab(ctk.CTkFrame):
             return
 
         # Prepare synthesis settings
-        voice = self.controller.params.voice_var.get()
+        voice_raw = self.controller.params.voice_var.get()
+        # Handle potential flag in first index
+        voice_data = voice_raw.split(' ')
+        voice = " ".join(voice_data[1:]) if len(voice_data) > 1 else voice_data[0]
+        
         speed = self.controller.params.speed_var.get()
         engine = self.controller.params.engine_var.get()
         output_folder = self.controller.params.output_path.get() or "."
