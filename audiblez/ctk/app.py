@@ -16,7 +16,8 @@ class AudiblezApp(ctk.CTk):
         super().__init__()
 
         # Load settings
-        self.user_settings = db.load_all_user_settings(ui_name='ctk')
+        self.user_settings = db.load_all_user_settings()
+
         self.selected_file_path = None
         self.current_parsing_method = 1 # 1: Standard, 2: Zip, 3: Calibre
         
@@ -213,7 +214,13 @@ class AudiblezApp(ctk.CTk):
         # Handle potential flag in first index
         voice = " ".join(voice_data[1:]) if len(voice_data) > 1 else voice_data[0]
         
+        # Map UI label back to internal value for M4B
+        m4b_display = self.params.m4b_var.get()
+        display_to_val = {"Original": "original", "Extra Crispy": "crispy"}
+        m4b_val = display_to_val.get(m4b_display, "original")
+
         params = {
+
             'file_path': self.selected_file_path,
             'voice': voice,
             'pick_manually': False,
@@ -221,8 +228,10 @@ class AudiblezApp(ctk.CTk):
             'engine': self.params.engine_var.get(),
             'output_folder': self.params.output_path.get() or ".",
             'selected_chapters': [c for i, c in enumerate(self.current_book['chapters']) if self.chapters_tab.chapter_vars[i].get()],
-            'm4b_assembly_method': self.params.m4b_var.get()
+            'm4b_assembly_method': m4b_val,
+            'custom_rate': self.params.rate_var.get()
         }
+
 
         self.synth_thread = CoreThread(params, self.handle_core_event)
         self.synth_thread.start()
@@ -276,8 +285,10 @@ class AudiblezApp(ctk.CTk):
             'engine': settings.get('engine'),
             'output_folder': settings.get('output_folder') or ".",
             'selected_chapters': selected_chapters,
-            'm4b_assembly_method': settings.get('m4b_assembly_method', 'original')
+            'm4b_assembly_method': settings.get('m4b_assembly_method', 'original'),
+            'custom_rate': settings.get('custom_rate')
         }
+
 
         self.synth_thread = CoreThread(params, self.handle_core_event)
         self.synth_thread.start()
@@ -332,7 +343,8 @@ class AudiblezApp(ctk.CTk):
 
     def on_resize(self, event):
         if event.widget == self:
-            db.save_user_setting('window_geometry', f"{self.winfo_width()}x{self.winfo_height()}", ui_name='ctk')
+            db.save_user_setting('window_geometry', f"{self.winfo_width()}x{self.winfo_height()}")
+
 
     def on_close(self):
         self.destroy()

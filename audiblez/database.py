@@ -37,10 +37,10 @@ def create_tables(conn: sqlite3.Connection):
     """Creates the necessary tables in the database if they don't exist."""
     cursor = conn.cursor()
 
-    # User Settings Table
+    # User Settings Table - Single row configuration
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS user_settings (
-            ui_name TEXT DEFAULT 'wx',
+            id INTEGER PRIMARY KEY CHECK (id = 1),
             engine TEXT,
             voice TEXT,
             speed REAL,
@@ -50,23 +50,13 @@ def create_tables(conn: sqlite3.Connection):
             m4b_assembly_method TEXT,
             dark_mode TEXT,
             window_geometry TEXT,
-            output_folder TEXT,
-            PRIMARY KEY (ui_name)
+            output_folder TEXT
         )
     """)
 
-    # Check for ui_name column (backward compatibility)
-    try:
-        cursor.execute("ALTER TABLE user_settings ADD COLUMN ui_name TEXT DEFAULT 'wx'")
-    except sqlite3.OperationalError:
-        pass # Already exists
 
-    # Migrate existing data if needed (assuming id=1 was 'wx')
-    cursor.execute("UPDATE user_settings SET ui_name = 'wx' WHERE ui_name IS NULL")
-
-    # The id column is no longer needed if we use ui_name as PK, 
-    # but we'll keep it for minimal disruption if other things expect it, 
-    # though PK(ui_name) is better for our multi-UI goal.
+    # Ensure a single settings row exists
+    cursor.execute("INSERT OR IGNORE INTO user_settings (id) VALUES (1)")
     
     # Add dark_mode column to user_settings if it doesn't exist for backward compatibility
     try:
@@ -160,13 +150,12 @@ def create_tables(conn: sqlite3.Connection):
 
     conn.commit()
 
-def save_user_setting(setting_name: str, setting_value, ui_name='wx'):
+def save_user_setting(setting_name: str, setting_value):
     """Saves a user setting to the database.
 
     Args:
         setting_name (str): The name of the setting (e.g., "engine", "voice").
         setting_value: The value of the setting.
-        ui_name (str): The name of the UI (e.g., 'wx', 'ctk').
     """
     conn = connect_db()
     cursor = conn.cursor()
@@ -176,17 +165,7 @@ def save_user_setting(setting_name: str, setting_value, ui_name='wx'):
             print(f"Error: Invalid setting_name '{setting_name}' for update/insert.")
             return
 
-        cursor.execute("SELECT ui_name FROM user_settings WHERE ui_name = ?", (ui_name,))
-        row = cursor.fetchone()
-
-        if row:
-            # Update existing row
-            cursor.execute(f"UPDATE user_settings SET {setting_name} = ? WHERE ui_name = ?", (setting_value, ui_name))
-        else:
-            # Insert new row
-            column_names = ["ui_name", setting_name]
-            placeholders = ["?", "?"]
-            cursor.execute(f"INSERT INTO user_settings ({', '.join(column_names)}) VALUES ({', '.join(placeholders)})", (ui_name, setting_value))
+        cursor.execute(f"UPDATE user_settings SET {setting_name} = ? WHERE id = 1", (setting_value,))
 
         conn.commit()
     except sqlite3.Error as e:
@@ -194,12 +173,11 @@ def save_user_setting(setting_name: str, setting_value, ui_name='wx'):
     finally:
         conn.close()
 
-def load_user_setting(setting_name: str, ui_name='wx'):
+def load_user_setting(setting_name: str):
     """Loads a specific user setting from the database.
 
     Args:
         setting_name (str): The name of the setting to load.
-        ui_name (str): The name of the UI.
 
     Returns:
         The value of the setting, or None if not found or an error occurs.
@@ -212,19 +190,19 @@ def load_user_setting(setting_name: str, ui_name='wx'):
             print(f"Error: Invalid setting_name '{setting_name}' for load.")
             return None
 
-        cursor.execute(f"SELECT {setting_name} FROM user_settings WHERE ui_name = ?", (ui_name,))
+        cursor.execute(f"SELECT {setting_name} FROM user_settings WHERE id = 1")
         row = cursor.fetchone()
         if row:
             return row[0]
         return None
     except sqlite3.Error as e:
-        print(f"Database error in load_user_setting for '{setting_name}' ({ui_name}): {e}")
+        print(f"Database error in load_user_setting for '{setting_name}': {e}")
         return None
     finally:
         conn.close()
 
-def load_all_user_settings(ui_name='wx') -> dict:
-    """Loads all user settings from the database for a specific UI.
+def load_all_user_settings() -> dict:
+    """Loads all user settings from the database.
 
     Returns:
         A dictionary containing all settings, or an empty dictionary if no
@@ -234,7 +212,7 @@ def load_all_user_settings(ui_name='wx') -> dict:
     cursor = conn.cursor()
     settings = {}
     try:
-        cursor.execute("SELECT engine, voice, speed, custom_rate, next_scheduled_run, calibre_ebook_convert_path, m4b_assembly_method, dark_mode, window_geometry, output_folder FROM user_settings WHERE ui_name = ?", (ui_name,))
+        cursor.execute("SELECT engine, voice, speed, custom_rate, next_scheduled_run, calibre_ebook_convert_path, m4b_assembly_method, dark_mode, window_geometry, output_folder FROM user_settings WHERE id = 1")
         row = cursor.fetchone()
         if row:
             settings = {
@@ -251,7 +229,7 @@ def load_all_user_settings(ui_name='wx') -> dict:
             }
         return settings
     except sqlite3.Error as e:
-        print(f"Database error in load_all_user_settings ({ui_name}): {e}")
+        print(f"Database error in load_all_user_settings: {e}")
         return settings # Return empty settings dict on error
     finally:
         conn.close()

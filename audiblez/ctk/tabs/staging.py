@@ -49,13 +49,20 @@ class StagingTab(ctk.CTkFrame):
         voice_data = voice_raw.split(' ')
         voice = " ".join(voice_data[1:]) if len(voice_data) > 1 else voice_data[0]
         
+        # Map UI label back to internal value for M4B
+        m4b_display = self.controller.params.m4b_var.get()
+        display_to_val = {"Original": "original", "Extra Crispy": "crispy"}
+        m4b_val = display_to_val.get(m4b_display, "original")
+
         settings = {
             'voice': voice,
             'speed': float(self.controller.params.speed_var.get()),
             'engine': self.controller.params.engine_var.get(),
             'output_folder': self.controller.params.output_path.get() or ".",
-            'm4b_assembly_method': self.controller.params.m4b_var.get()
+            'm4b_assembly_method': m4b_val,
+            'custom_rate': self.controller.params.rate_var.get()
         }
+
 
         details = {
             'staged_book_id': book['id'],

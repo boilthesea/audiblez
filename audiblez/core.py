@@ -90,7 +90,9 @@ def _get_chapter_title(c, fallback="chapter"):
 def main(file_path, voice, pick_manually, speed, output_folder='.',
          max_chapters=None, max_sentences=None, selected_chapters=None, post_event=None,
          calibre_metadata: dict | None = None, calibre_cover_image_path: str | None = None,
-         m4b_assembly_method: str = 'original', engine=None):
+         m4b_assembly_method: str = 'original', engine=None, custom_rate=None):
+
+
     if post_event: post_event('CORE_STARTED')
     load_spacy()
     if output_folder != '.':
@@ -167,23 +169,29 @@ def main(file_path, voice, pick_manually, speed, output_folder='.',
     if not has_ffmpeg:
         print('\033[91m' + 'ffmpeg not found. Please install ffmpeg to create mp3 and m4b audiobook files.' + '\033[0m')
 
-    # Load custom rate from database and determine chars_per_sec for stats
-    db_custom_rate = load_user_setting('custom_rate')
+    # Determine chars_per_sec for stats. Try parameter first, then database, then default.
     default_chars_per_sec = 500 if torch.cuda.is_available() else 50
     current_chars_per_sec = default_chars_per_sec
 
-    if db_custom_rate is not None:
+    # Use explicitly passed custom_rate if provided
+    rate_to_use = custom_rate
+    if rate_to_use is None:
+        # Fallback to database if not passed (legacy/other UIs)
+        rate_to_use = load_user_setting('custom_rate')
+
+    if rate_to_use is not None:
         try:
-            rate_from_db = int(db_custom_rate)
-            if rate_from_db > 0:
-                current_chars_per_sec = rate_from_db
-                print(f"Using custom characters-per-second rate from database: {current_chars_per_sec}")
+            rate_val = int(rate_to_use)
+            if rate_val > 0:
+                current_chars_per_sec = rate_val
+                print(f"Using characters-per-second rate: {current_chars_per_sec}")
             else:
-                print(f"Invalid custom rate from database ({db_custom_rate}), using default: {default_chars_per_sec}")
+                print(f"Invalid custom rate ({rate_to_use}), using default: {default_chars_per_sec}")
         except ValueError:
-            print(f"Could not parse custom rate from database ('{db_custom_rate}'), using default: {default_chars_per_sec}")
+            print(f"Could not parse custom rate ('{rate_to_use}'), using default: {default_chars_per_sec}")
     else:
-        print(f"No custom rate in database, using default: {default_chars_per_sec}")
+        print(f"No custom rate provided, using default: {default_chars_per_sec}")
+
 
     stats = SimpleNamespace(
         total_chars=sum(map(len, texts)),
