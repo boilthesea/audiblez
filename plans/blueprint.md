@@ -22,25 +22,26 @@ The application follows a modular "Engine" pattern, allowing different TTS backe
 
 ### Management & Entry Points
 
-- **[cli.py](file:///s:/Files/nexus/http/audiblez/audiblez/cli.py)**: Entry point for the Command Line Interface. Handles argument parsing and execution flow.
-- **[ui.py](file:///s:/Files/nexus/http/audiblez/audiblez/ui.py)**: Modern **CustomTkinter** GUI entry point. Now the primary interface.
-- **[ctk/](file:///s:/Files/nexus/http/audiblez/audiblez/ctk/)**: Modular components for the modern UI (tabs, panels, custom widgets).
-- **[database.py](file:///s:/Files/nexus/http/audiblez/audiblez/database.py)**: SQLite integration. Enhanced to support isolated settings for different UIs (`ui_name` key) and persistent output folders.
+- **[cli.py](../audiblez/cli.py)**: Entry point for the Command Line Interface. Handles argument parsing and execution flow.
+- **[ui.py](../audiblez/ui.py)**: Modern **CustomTkinter** GUI entry point. Now the primary interface.
+- **[ctk/](../audiblez/ctk/)**: Modular components for the modern UI (tabs, panels, custom widgets).
+- **[database.py](../audiblez/database.py)**: SQLite integration. Enhanced to support isolated settings for different UIs (`ui_name` key) and persistent output folders.
 
 ### Synthesis & Logic
 
-- **[core.py](file:///s:/Files/nexus/http/audiblez/audiblez/core.py)**: The central logic hub. Manages the conversion lifecycle, chapter discovery, and final file assembly via FFmpeg.
-- **[engines/](file:///s:/Files/nexus/http/audiblez/audiblez/engines/)**: Modular TTS drivers.
-  - `base.py`: Abstract base class for all engines.
-  - `kokoro_engine.py`: Default high-speed engine. Includes CPU/CUDA device selection.
-  - `qwen3_engine.py`: Support for advanced LLM-based TTS. [Testing]
-- **[voices.py](file:///s:/Files/nexus/http/audiblez/audiblez/voices.py)**: Configuration and list of supported TTS voices across different languages.
+- **[core.py](../audiblez/core.py)**: The central logic hub. Manages the conversion lifecycle, chapter discovery, and final file assembly via FFmpeg.
+- **[engines/](../audiblez/engines/)**: Modular TTS drivers. [TODO]
+  - `base.py`: Abstract base class for all engines. [TODO]
+  - `kokoro_engine.py`: Default high-speed engine. Includes CPU/CUDA device selection. [TODO]
+  - `qwen3_engine.py`: Support for advanced LLM-based TTS. [TODO]
+  - `luxtts_engine.py`: Support for LuxTTS (next on the list). [TODO]
+- **[voices.py](../audiblez/voices.py)**: Configuration and list of supported TTS voices across different languages.
 
 ### Utilities
 
-- **[calibre_handler.py](file:///s:/Files/nexus/http/audiblez/audiblez/calibre_handler.py)**: Optimized logic for parsing EPUBs. Now includes three experimental methods: Standard (ebooklib), Zip-direct, and Calibre-only (conversion).
-- **[text_utils.py](file:///s:/Files/nexus/http/audiblez/audiblez/text_utils.py)**: Helpers for text normalization and sentence-level chunking.
-- **[inspector.py](file:///s:/Files/nexus/http/audiblez/audiblez/inspector.py)**: Debugging tool for analyzing EPUB structure and metadata.
+- **[calibre_handler.py](../audiblez/calibre_handler.py)**: Optimized logic for parsing EPUBs. Now includes three experimental methods: Standard (ebooklib), Zip-direct, and Calibre-only (conversion).
+- **[text_utils.py](../audiblez/text_utils.py)**: Helpers for text normalization and sentence-level chunking.
+- **[inspector.py](../audiblez/inspector.py)**: Debugging tool for analyzing EPUB structure and metadata.
 
 ## Development Reference
 
@@ -58,4 +59,4 @@ The application follows a modular "Engine" pattern, allowing different TTS backe
 
 ## Task & Planning
 
-New features or major refactors should be documented in the **[plans/](file:///s:/Files/nexus/http/audiblez/plans/)** directory to maintain architectural clarity.
+New features or major refactors should be documented in the **[plans/](./)** directory to maintain architectural clarity.

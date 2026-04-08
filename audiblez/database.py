@@ -50,7 +50,10 @@ def create_tables(conn: sqlite3.Connection):
             m4b_assembly_method TEXT,
             dark_mode TEXT,
             window_geometry TEXT,
-            output_folder TEXT
+            output_folder TEXT,
+            tts_model TEXT DEFAULT 'kokoro',
+            luxtts_reference_wav TEXT,
+            luxtts_num_steps INTEGER DEFAULT 4
         )
     """)
 
@@ -79,6 +82,42 @@ def create_tables(conn: sqlite3.Connection):
     # Add output_folder column
     try:
         cursor.execute("ALTER TABLE user_settings ADD COLUMN output_folder TEXT")
+    except sqlite3.OperationalError as e:
+        if "duplicate column name" in str(e).lower():
+            pass
+        else:
+            raise
+
+    # Add tts_model column
+    try:
+        cursor.execute("ALTER TABLE user_settings ADD COLUMN tts_model TEXT DEFAULT 'kokoro'")
+    except sqlite3.OperationalError as e:
+        if "duplicate column name" in str(e).lower():
+            pass
+        else:
+            raise
+
+    # Add luxtts_reference_wav column
+    try:
+        cursor.execute("ALTER TABLE user_settings ADD COLUMN luxtts_reference_wav TEXT")
+    except sqlite3.OperationalError as e:
+        if "duplicate column name" in str(e).lower():
+            pass
+        else:
+            raise
+
+    # Add luxtts_num_steps column
+    try:
+        cursor.execute("ALTER TABLE user_settings ADD COLUMN luxtts_num_steps INTEGER DEFAULT 4")
+    except sqlite3.OperationalError as e:
+        if "duplicate column name" in str(e).lower():
+            pass
+        else:
+            raise
+
+    # Add luxtts_max_chunk_len column
+    try:
+        cursor.execute("ALTER TABLE user_settings ADD COLUMN luxtts_max_chunk_len INTEGER DEFAULT 900")
     except sqlite3.OperationalError as e:
         if "duplicate column name" in str(e).lower():
             pass
@@ -160,7 +199,7 @@ def save_user_setting(setting_name: str, setting_value):
     conn = connect_db()
     cursor = conn.cursor()
     try:
-        valid_columns = ["engine", "voice", "speed", "custom_rate", "next_scheduled_run", "calibre_ebook_convert_path", "m4b_assembly_method", "dark_mode", "window_geometry", "output_folder"]
+        valid_columns = ["engine", "voice", "speed", "custom_rate", "next_scheduled_run", "calibre_ebook_convert_path", "m4b_assembly_method", "dark_mode", "window_geometry", "output_folder", "tts_model", "luxtts_reference_wav", "luxtts_num_steps"]
         if setting_name not in valid_columns:
             print(f"Error: Invalid setting_name '{setting_name}' for update/insert.")
             return
@@ -185,7 +224,7 @@ def load_user_setting(setting_name: str):
     conn = connect_db()
     cursor = conn.cursor()
     try:
-        valid_columns = ["engine", "voice", "speed", "custom_rate", "next_scheduled_run", "calibre_ebook_convert_path", "m4b_assembly_method", "dark_mode", "window_geometry", "output_folder"]
+        valid_columns = ["engine", "voice", "speed", "custom_rate", "next_scheduled_run", "calibre_ebook_convert_path", "m4b_assembly_method", "dark_mode", "window_geometry", "output_folder", "tts_model", "luxtts_reference_wav", "luxtts_num_steps"]
         if setting_name not in valid_columns:
             print(f"Error: Invalid setting_name '{setting_name}' for load.")
             return None
@@ -212,7 +251,7 @@ def load_all_user_settings() -> dict:
     cursor = conn.cursor()
     settings = {}
     try:
-        cursor.execute("SELECT engine, voice, speed, custom_rate, next_scheduled_run, calibre_ebook_convert_path, m4b_assembly_method, dark_mode, window_geometry, output_folder FROM user_settings WHERE id = 1")
+        cursor.execute("SELECT engine, voice, speed, custom_rate, next_scheduled_run, calibre_ebook_convert_path, m4b_assembly_method, dark_mode, window_geometry, output_folder, tts_model, luxtts_reference_wav, luxtts_num_steps FROM user_settings WHERE id = 1")
         row = cursor.fetchone()
         if row:
             settings = {
@@ -226,6 +265,9 @@ def load_all_user_settings() -> dict:
                 "dark_mode": row[7],
                 "window_geometry": row[8],
                 "output_folder": row[9],
+                "tts_model": row[10],
+                "luxtts_reference_wav": row[11],
+                "luxtts_num_steps": row[12],
             }
         return settings
     except sqlite3.Error as e:
@@ -453,7 +495,7 @@ def add_item_to_queue(details: dict) -> int | None:
             'pending', # Initial status
             new_queue_order
         ))
-        queue_item_id = cursor.lastrowid
+        queue_item_id = queue_item_id = cursor.lastrowid
         # print(f"DEBUG_DB: synthesis_queue insert generated queue_item_id: {queue_item_id}")
         if not queue_item_id:
             conn.rollback()

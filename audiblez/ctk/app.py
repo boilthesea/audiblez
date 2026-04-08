@@ -218,20 +218,22 @@ class AudiblezApp(ctk.CTk):
         m4b_display = self.params.m4b_var.get()
         display_to_val = {"Original": "original", "Extra Crispy": "crispy"}
         m4b_val = display_to_val.get(m4b_display, "original")
-
+        
         params = {
-
             'file_path': self.selected_file_path,
             'voice': voice,
             'pick_manually': False,
-            'speed': float(self.params.speed_var.get()),
-            'engine': self.params.engine_var.get(),
+            'speed': float(self.params.speed_var.get() or 1.0),
+            'engine_device': self.params.engine_var.get(),
             'output_folder': self.params.output_path.get() or ".",
             'selected_chapters': [c for i, c in enumerate(self.current_book['chapters']) if self.chapters_tab.chapter_vars[i].get()],
             'm4b_assembly_method': m4b_val,
-            'custom_rate': self.params.rate_var.get()
+            'custom_rate': self.params.rate_var.get(),
+            'tts_model': self.params.model_var.get(),
+            'reference_wav': self.params.ref_wav_var.get(),
+            'num_steps': int(self.params.steps_var.get() or 4),
+            'max_chunk_len': int(self.params.chunk_var.get() or 900)
         }
-
 
         self.synth_thread = CoreThread(params, self.handle_core_event)
         self.synth_thread.start()
@@ -282,11 +284,15 @@ class AudiblezApp(ctk.CTk):
             'voice': voice,
             'pick_manually': False,
             'speed': float(settings.get('speed', 1.0)),
-            'engine': settings.get('engine'),
+            'engine_device': settings.get('engine'),
             'output_folder': settings.get('output_folder') or ".",
             'selected_chapters': selected_chapters,
             'm4b_assembly_method': settings.get('m4b_assembly_method', 'original'),
-            'custom_rate': settings.get('custom_rate')
+            'custom_rate': settings.get('custom_rate'),
+            'tts_model': settings.get('tts_model', 'kokoro'),
+            'reference_wav': settings.get('luxtts_reference_wav'),
+            'num_steps': int(settings.get('luxtts_num_steps', 4)),
+            'max_chunk_len': int(settings.get('luxtts_max_chunk_len', 900))
         }
 
 

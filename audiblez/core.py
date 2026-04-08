@@ -23,7 +23,7 @@ from tabulate import tabulate
 from pathlib import Path
 from string import Formatter
 from bs4 import BeautifulSoup
-from kokoro import KPipeline
+import audiblez.engines as engines # Updated
 from ebooklib import epub
 from pick import pick
 import importlib.resources # Added for accessing package data files
@@ -90,7 +90,8 @@ def _get_chapter_title(c, fallback="chapter"):
 def main(file_path, voice, pick_manually, speed, output_folder='.',
          max_chapters=None, max_sentences=None, selected_chapters=None, post_event=None,
          calibre_metadata: dict | None = None, calibre_cover_image_path: str | None = None,
-         m4b_assembly_method: str = 'original', engine=None, custom_rate=None):
+         m4b_assembly_method: str = 'original', engine_device=None, custom_rate=None,
+         tts_model='kokoro', reference_wav=None, num_steps=4, max_chunk_len=900):
 
 
     if post_event: post_event('CORE_STARTED')
@@ -111,8 +112,6 @@ def main(file_path, voice, pick_manually, speed, output_folder='.',
         print("Processing with Calibre-derived data.")
         title = calibre_metadata.get('title', title)
         creator = calibre_metadata.get('creator', creator)
-        # Language from Calibre metadata could be used by KPipeline if needed, but KPipeline sets lang by voice.
-        # For now, primarily for M4B metadata.
 
         if calibre_cover_image_path and Path(calibre_cover_image_path).exists():
             try:
@@ -123,16 +122,10 @@ def main(file_path, voice, pick_manually, speed, output_folder='.',
                 print(f"Error reading Calibre cover image from '{calibre_cover_image_path}': {e}")
                 cover_image = b""
 
-        # For Calibre workflow, `selected_chapters` are already provided and are SimpleNamespace objects.
-        # `document_chapters` is not strictly needed if `selected_chapters` is always given.
-        # However, `print_selected_chapters` expects `document_chapters` for context.
-        # If `selected_chapters` is what we operate on, `document_chapters` can be set to it.
         if selected_chapters:
             document_chapters = selected_chapters # Use the pre-processed chapters
         else:
             print("Warning: Calibre workflow initiated but no selected_chapters provided to core.main.")
-            # This case should ideally not happen if UI passes chapters.
-            # If it does, we can't proceed without chapters.
             if post_event: post_event('CORE_FINISHED', error_message="No chapters provided for Calibre book.")
             return
 
@@ -204,7 +197,16 @@ def main(file_path, voice, pick_manually, speed, output_folder='.',
     eta = strfdelta((stats.total_chars - stats.processed_chars) / stats.chars_per_sec)
     print(f'Estimated time remaining (assuming {stats.chars_per_sec} chars/sec): {eta}')
     set_espeak_library()
-    pipeline = KPipeline(lang_code=voice[0], device=engine)  # a for american or b for british etc.
+    
+    # Initialize the selected engine
+    active_engine = engines.get_engine(tts_model, engine_device)
+    engine_kwargs = {
+        'voice': voice,
+        'speed': speed,
+        'reference_wav': reference_wav,
+        'num_steps': num_steps,
+        'max_chunk_len': max_chunk_len
+    }
 
     chapter_wav_files = []
     for i, chapter in enumerate(selected_chapters, start=1):
@@ -226,47 +228,50 @@ def main(file_path, voice, pick_manually, speed, output_folder='.',
         chapter_wav_path = Path(output_folder) / f'{base_filename_stem}_chapter_{i}_{voice}_{safe_original_name}.wav'
         chapter_wav_files.append(chapter_wav_path)
 
-        # Apply filters before checking length or existence, so stats are based on filtered text length
-        # (though current stats.processed_chars uses pre-filter length if skipping)
         if i == 1:
             # add intro text
             text = f'{title} – {creator}.\n\n' + text
 
         # Apply filters to the chapter text
-        # The default filter_file_path in apply_filters is "audiblez/filter.txt"
         filtered_text = apply_filters(text)
-        # It might be useful to know if text changed:
-        # if filtered_text != text:
-        #    print(f"DEBUG: Filters applied to chapter {i}. Original length: {len(text)}, New length: {len(filtered_text)}")
-        # text = filtered_text # Use filtered text from here
 
         if Path(chapter_wav_path).exists():
             print(f'File for chapter {i} already exists. Skipping')
-            # Note: stats.processed_chars here will use original text length if we don't update 'text' var earlier
             stats.processed_chars += len(text) # Original text length for skip consistency
             if post_event:
                 post_event('CORE_CHAPTER_FINISHED', chapter_index=chapter_index)
             continue
 
-        # Use filtered text for length check and processing
         if len(filtered_text.strip()) < 10:
             print(f'Skipping empty chapter {i} (after filtering)')
             chapter_wav_files.remove(chapter_wav_path)
-            # Potentially add original length to processed_chars if skipping here, or adjust logic
-            # For now, skipping means it doesn't contribute to processed_chars beyond initial estimate
             continue
 
         start_time = time.time()
         if post_event: post_event('CORE_CHAPTER_STARTED', chapter_index=chapter_index)
-        audio_segments = gen_audio_segments(
-            pipeline, filtered_text, voice, speed, stats, post_event=post_event, max_sentences=max_sentences)
-        if audio_segments:
-            final_audio = np.concatenate(audio_segments)
-            soundfile.write(chapter_wav_path, final_audio, sample_rate)
+        
+        # Synthesis using the engine interface
+        audio_data, current_sample_rate = active_engine.generate(filtered_text, **engine_kwargs)
+        
+        if audio_data.size > 0:
+            soundfile.write(chapter_wav_path, audio_data, current_sample_rate)
             end_time = time.time()
             delta_seconds = end_time - start_time
             chars_per_sec = len(text) / delta_seconds
             print('Chapter written to', chapter_wav_path)
+            
+            # Progress tracking
+            if stats:
+                stats.processed_chars += len(filtered_text)
+                if stats.total_chars > 0:
+                    stats.progress = int((stats.processed_chars / stats.total_chars) * 100)
+                else:
+                    stats.progress = 100
+                stats.eta = strfdelta((stats.total_chars - stats.processed_chars) / stats.chars_per_sec)
+                if post_event: post_event('CORE_PROGRESS', stats=stats)
+                print(f'Estimated time remaining: {stats.eta}')
+                print('Progress:', f'{stats.progress}%\n')
+
             if post_event: post_event('CORE_CHAPTER_FINISHED', chapter_index=chapter_index)
             print(f'Chapter {i} read in {delta_seconds:.2f} seconds ({chars_per_sec:.0f} characters per second)')
         else:
@@ -274,7 +279,6 @@ def main(file_path, voice, pick_manually, speed, output_folder='.',
             chapter_wav_files.remove(chapter_wav_path)
 
     if has_ffmpeg:
-        # Use the original input filename (which includes original extension) for M4B naming logic
         create_index_file(title, creator, chapter_wav_files, output_folder)
         create_m4b(chapter_wav_files, Path(file_path).name, cover_image, output_folder, m4b_assembly_method)
         if post_event: post_event('CORE_FINISHED')
@@ -290,7 +294,6 @@ def find_cover(book):
         if is_image(item):
             return item
 
-    # https://idpf.org/forum/topic-715
     for meta in book.get_metadata('OPF', 'cover'):
         if is_image(item := book.get_item_with_id(meta[1]['content'])):
             return item
@@ -313,39 +316,23 @@ def print_selected_chapters(document_chapters, chapters):
     ], headers=['#', 'Chapter', 'Text Length', 'Selected', 'First words']))
 
 
-def gen_audio_segments(pipeline, text, voice, speed, stats=None, max_sentences=None, post_event=None):
-    nlp = spacy.load('xx_ent_wiki_sm')
-    nlp.add_pipe('sentencizer')
-    audio_segments = []
-    doc = nlp(text)
-    sentences = list(doc.sents)
-    for i, sent in enumerate(sentences):
-        if max_sentences and i > max_sentences: break
-        for gs, ps, audio in pipeline(sent.text, voice=voice, speed=speed, split_pattern=r'\n\n\n'):
-            audio_segments.append(audio)
-        if stats:
-            stats.processed_chars += len(sent.text)
-            # Use floating point division for more accurate progress percentage
-            if stats.total_chars > 0:
-                stats.progress = int((stats.processed_chars / stats.total_chars) * 100)
-            else:
-                stats.progress = 100
-            stats.eta = strfdelta((stats.total_chars - stats.processed_chars) / stats.chars_per_sec)
-            if post_event: post_event('CORE_PROGRESS', stats=stats)
-            print(f'Estimated time remaining: {stats.eta}')
-            print('Progress:', f'{stats.progress}%\n')
-    return audio_segments
-
-
-def gen_text(text, voice='af_heart', output_file='text.wav', speed=1, play=False, engine=None):
-    lang_code = voice[:1]
-    pipeline = KPipeline(lang_code=lang_code, device=engine)
+def gen_text(text, voice='af_heart', output_file='text.wav', speed=1, play=False, engine_device=None,
+             tts_model='kokoro', reference_wav=None, num_steps=4, max_chunk_len=900):
     load_spacy()
-    audio_segments = gen_audio_segments(pipeline, text, voice=voice, speed=speed);
-    final_audio = np.concatenate(audio_segments)
-    soundfile.write(output_file, final_audio, sample_rate)
-    if play:
-        subprocess.run(['ffplay', '-autoexit', '-nodisp', output_file])
+    set_espeak_library()
+    active_engine = engines.get_engine(tts_model, engine_device)
+    engine_kwargs = {
+        'voice': voice,
+        'speed': speed,
+        'reference_wav': reference_wav,
+        'num_steps': num_steps,
+        'max_chunk_len': max_chunk_len
+    }
+    audio_data, current_sample_rate = active_engine.generate(text, **engine_kwargs)
+    if audio_data.size > 0:
+        soundfile.write(output_file, audio_data, current_sample_rate)
+        if play:
+            subprocess.run(['ffplay', '-autoexit', '-nodisp', output_file])
 
 
 def find_document_chapters_and_extract_texts(book, include_skeleton=False):
@@ -438,10 +425,6 @@ def concat_wavs_with_ffmpeg(chapter_files, output_folder, filename):
 
 
 def concat_wavs_with_ffmpeg_crispy(chapter_files: list[Path], output_folder: str, temp_concat_filename: str) -> Path:
-    """
-    Concatenates WAV files into a single temporary WAV file using relative paths.
-    This is the 'Extra Crispy' method, designed to be more robust on Windows.
-    """
     output_path = Path(output_folder)
     wav_list_filename = "crispy_wav_list.txt"
     wav_list_path = output_path / wav_list_filename
@@ -450,11 +433,7 @@ def concat_wavs_with_ffmpeg_crispy(chapter_files: list[Path], output_folder: str
     try:
         with open(wav_list_path, 'w', encoding='utf-8') as f:
             for wav_file_abs in chapter_files:
-                # Use relative paths in the list file
                 wav_file_relative = wav_file_abs.relative_to(output_path)
-                # Escape single quotes for ffmpeg concat demuxer, which uses a shell-like syntax.
-                # A single quote is escaped by ending the string, adding an escaped quote, and starting a new string.
-                # e.g., "it's" becomes "it'\''s"
                 safe_path = wav_file_relative.as_posix().replace("'", r"'\''")
                 f.write(f"file '{safe_path}'\n")
 
@@ -465,20 +444,16 @@ def concat_wavs_with_ffmpeg_crispy(chapter_files: list[Path], output_folder: str
         ]
 
         print(f"Executing 'Extra Crispy' WAV concatenation in '{output_folder}': {' '.join(command)}")
-        # Execute ffmpeg with cwd=output_folder to use relative paths
         proc = subprocess.run(command, cwd=output_folder, capture_output=True, text=True, check=True)
         print("Concatenation successful.")
 
     except subprocess.CalledProcessError as e:
         print(f"ERROR: 'Extra Crispy' WAV concatenation failed with exit code {e.returncode}.")
-        print(f"ffmpeg stdout:\n{e.stdout}")
-        print(f"ffmpeg stderr:\n{e.stderr}")
-        raise  # Re-raise the exception to be caught by create_m4b
+        raise
     except Exception as e:
         print(f"An unexpected error occurred during 'Extra Crispy' concatenation: {e}")
         raise
     finally:
-        # Clean up the list file
         if wav_list_path.exists():
             try:
                 wav_list_path.unlink()
@@ -556,8 +531,6 @@ def create_m4b(chapter_files: list[str], original_input_filename: str, cover_ima
         except subprocess.CalledProcessError as e:
             if cover_image:
                 print(f"Warning: M4B assembly with cover image failed. Retrying without cover. Reason: {e}")
-                print(f"ffmpeg stderr:\n{e.stderr}")
-                # Re-construct command without cover
                 ffmpeg_command_no_cover = [
                     'ffmpeg', '-y',
                     '-i', str(concat_file_path.relative_to(output_path).as_posix()),
@@ -566,7 +539,6 @@ def create_m4b(chapter_files: list[str], original_input_filename: str, cover_ima
                     '-c:a', 'aac', '-b:a', '64k', '-f', 'mp4',
                     str(temp_m4b_filepath.relative_to(output_path).as_posix())
                 ]
-                print(f"Executing ffmpeg command (no cover) in '{output_folder}': {' '.join(ffmpeg_command_no_cover)}")
                 proc = subprocess.run(ffmpeg_command_no_cover, cwd=output_folder, capture_output=True, text=True, check=True)
             else:
                 raise
@@ -576,15 +548,11 @@ def create_m4b(chapter_files: list[str], original_input_filename: str, cover_ima
                 final_filename.unlink()
             temp_m4b_filepath.rename(final_filename)
             print(f"'{final_filename}' created successfully. Enjoy your audiobook.")
-            print("Feel free to delete the intermediary .wav chapter files; the .m4b is all you need.")
         else:
             raise RuntimeError(f"ffmpeg seemed to succeed but the output file '{temp_m4b_filepath}' was not found.")
 
     except (subprocess.CalledProcessError, RuntimeError, FileNotFoundError) as e:
         print(f"ERROR: M4B creation failed. Reason: {e}")
-        if isinstance(e, subprocess.CalledProcessError):
-            print(f"ffmpeg stdout:\n{e.stdout}")
-            print(f"ffmpeg stderr:\n{e.stderr}")
     finally:
         print("Cleaning up temporary files...")
         if concat_file_path and concat_file_path.exists():
@@ -624,7 +592,6 @@ def create_index_file(title, creator, chapter_mp3_files, output_folder):
 
 
 def unmark_element(element, stream=None):
-    """auxiliarry function to unmark markdown text"""
     if stream is None:
         stream = StringIO()
     if element.text:
@@ -637,174 +604,86 @@ def unmark_element(element, stream=None):
 
 
 def unmark(text):
-    """Unmark markdown text"""
-    markdown.Markdown.output_formats["plain"] = unmark_element  # patching Markdown
+    markdown.Markdown.output_formats["plain"] = unmark_element
     __md = markdown.Markdown(output_format="plain")
     __md.stripTopLevelTags = False
     return __md.convert(text)
 
 
 def apply_filters(text: str, filter_file_path: str = "audiblez/filter.txt") -> str:
-    """
-    Applies text replacements based on rules defined in the filter_file.
-    Each rule is pattern1,pattern2|replacement.
-    Lines starting with # are comments.
-    """
-    filter_file_name_default = "filter.txt"  # The actual filename
+    filter_file_name_default = "filter.txt"
 
-    # This inner function now correctly encapsulates rule processing from a stream.
     def _process_rules_from_stream(stream, stream_description_for_debug):
-        nonlocal text  # Allow modification of 'text' from the apply_filters scope
+        nonlocal text
         rules = []
         for i, line_content in enumerate(stream):
             line = line_content.strip()
             if not line or line.startswith('#'):
-                continue  # Correctly inside a loop
+                continue
             if '|' not in line:
-                # Corrected f-string and variable name
                 print(f"DEBUG: Warning: Malformed rule in filter file (line {i + 1} of '{stream_description_for_debug}', missing '|'): {line}")
-                continue  # Correctly inside a loop
+                continue
             patterns_str, replacement = line.split('|', 1)
             patterns = [p.strip() for p in patterns_str.split(',') if p.strip()]
             if not patterns:
-                # Corrected f-string and variable name
                 print(f"DEBUG: Warning: No patterns for replacement '{replacement}' (line {i + 1} of '{stream_description_for_debug}'): {line}")
-                continue  # Correctly inside a loop
+                continue
             rules.append({'patterns': patterns, 'replacement': replacement, 'line_num': i + 1})
 
         if not rules:
-            print(f"DEBUG: No valid filter rules found in '{stream_description_for_debug}'.")
-            return False  # No rules to apply
+            return False
 
-        # Corrected f-string and variable name
-        print(f"DEBUG: Loaded {len(rules)} filter rules from '{stream_description_for_debug}'.")
-        text_changed_overall = False
-        for rule_item in rules:  # Changed 'rule' to 'rule_item' to avoid conflict if 'rule' is a var name
+        for rule_item in rules:
             for pattern in rule_item['patterns']:
                 if "*" in pattern:
-                    # Wildcard matching: convert glob-style wildcard to regex
-                    # 'word*' -> 'word\w*'
-                    # '*word' -> '\w*word'
-                    # '*word*' -> '\w*word\w*'
                     regex_pattern = re.escape(pattern).replace(r'\*', r'\w*')
                 else:
-                    # Exact word matching for patterns without wildcards
-                    # Use negative lookarounds to ensure we match whole words/abbreviations only.
-                    # This prevents matching a filter pattern inside another word (e.g. "rd." in "word.").
                     regex_pattern = r'(?<!\w)' + re.escape(pattern) + r'(?!\w)'
 
                 new_text, count = re.subn(regex_pattern, rule_item['replacement'], text, flags=re.IGNORECASE)
                 if count > 0:
-                    # Corrected f-string and variable names
-                    print(f"DEBUG: Applied rule (line {rule_item['line_num']} from '{stream_description_for_debug}'): Replacing '{pattern}' with '{rule_item['replacement']}' ({count} occurrences).")
                     text = new_text
-                    text_changed_overall = True
-
-        if not text_changed_overall:
-            print(f"DEBUG: No changes made to the text by filtering with rules from '{stream_description_for_debug}'.")
-        else:
-            print(f"DEBUG: Text was changed by filtering with rules from '{stream_description_for_debug}'.")
-        return text_changed_overall
-
-    # Main logic for apply_filters
-    # resolved_filter_path_for_debug is defined here for use in outer error messages
-    resolved_filter_path_for_debug = filter_file_path
+        return True
 
     try:
         direct_path_obj = Path(filter_file_path)
-
-        # Heuristic: if filter_file_path is not the default "audiblez/filter.txt" or "filter.txt",
-        # it's likely a user-specified custom path.
         is_custom_path = (filter_file_path != f"audiblez/{filter_file_name_default}" and
                           filter_file_path != filter_file_name_default)
 
         if is_custom_path and direct_path_obj.is_file():
-            resolved_filter_path_for_debug = str(direct_path_obj)
-            print(f"DEBUG: Attempting to use user-specified direct filter file path: '{resolved_filter_path_for_debug}'")
-            if os.path.getsize(direct_path_obj) == 0:
-                print(f"DEBUG: Direct filter file '{resolved_filter_path_for_debug}' is empty. Skipping.")
-                return text
             with open(direct_path_obj, 'r', encoding='utf-8') as f_stream:
-                _process_rules_from_stream(f_stream, resolved_filter_path_for_debug)
+                _process_rules_from_stream(f_stream, str(direct_path_obj))
             return text
         elif is_custom_path and not direct_path_obj.exists():
-            # User specified a custom path, but it doesn't exist. Don't fall back to package resource.
-            print(f"DEBUG: User-specified filter file path '{filter_file_path}' not found. Skipping filtering.")
             return text
 
-        # If not a custom path, or custom path wasn't a file, try package resources for the default filename.
-        package_name = __name__.split('.')[0]
-        if package_name == "__main__" or package_name == "core": # Handle if run as script or __name__ is just 'core'
-            package_name = "audiblez"
-            print(f"DEBUG: __name__ is '{__name__}', adjusted package_name to '{package_name}' for resources.")
-
-        resolved_filter_path_for_debug = f"package resource '{package_name}/{filter_file_name_default}'"
-        print(f"DEBUG: Attempting to load filter '{filter_file_name_default}' from package '{package_name}' via importlib.resources.")
-
+        package_name = "audiblez"
         resource_found_and_processed = False
         try:
-            if hasattr(importlib.resources, 'files') and hasattr(importlib.resources.files(package_name), 'joinpath'):
+            if hasattr(importlib.resources, 'files'):
                 resource_file_traversable = importlib.resources.files(package_name).joinpath(filter_file_name_default)
                 if resource_file_traversable.is_file():
-                    resolved_filter_path_for_debug = str(resource_file_traversable) # More specific path
-                    try:
-                        file_size = resource_file_traversable.stat().st_size
-                        if file_size == 0:
-                            print(f"DEBUG: Package resource filter file '{resolved_filter_path_for_debug}' is empty. Skipping.")
-                            return text
-                    except Exception:
-                        print(f"DEBUG: Could not determine size of resource '{resolved_filter_path_for_debug}' beforehand via .stat().")
-
                     with resource_file_traversable.open('r', encoding='utf-8') as f_stream:
-                        _process_rules_from_stream(f_stream, resolved_filter_path_for_debug)
+                        _process_rules_from_stream(f_stream, str(resource_file_traversable))
                     resource_found_and_processed = True
-                else:
-                    print(f"DEBUG: Filter file '{filter_file_name_default}' not found as a file in package '{package_name}' using importlib.resources.files().")
 
             if not resource_found_and_processed and hasattr(importlib.resources, 'open_text'):
-                # Fallback for older Pythons or if .files() didn't find it / wasn't suitable
-                resolved_filter_path_for_debug = f"package resource '{package_name}/{filter_file_name_default}' (via open_text)"
                 with importlib.resources.open_text(package_name, filter_file_name_default, encoding='utf-8') as f_stream:
-                    _process_rules_from_stream(f_stream, resolved_filter_path_for_debug)
+                    _process_rules_from_stream(f_stream, f"{package_name}/{filter_file_name_default}")
                 resource_found_and_processed = True
 
             if not resource_found_and_processed:
-                # This block might be reached if no suitable importlib.resources API was found or worked.
-                # Last resort: try relative path for running from source root.
-                # This is now less likely to be needed due to more robust importlib.resources handling.
                 fallback_path_str = f"audiblez/{filter_file_name_default}"
                 fallback_path_obj = Path(fallback_path_str)
                 if fallback_path_obj.is_file():
-                    resolved_filter_path_for_debug = fallback_path_str
-                    print(f"DEBUG: Last resort: attempting to read '{resolved_filter_path_for_debug}' as a relative path.")
-                    if os.path.getsize(fallback_path_obj) == 0:
-                         print(f"DEBUG: Last resort filter file '{resolved_filter_path_for_debug}' is empty. Skipping.")
-                         return text
                     with open(fallback_path_obj, 'r', encoding='utf-8') as f_stream:
-                        _process_rules_from_stream(f_stream, resolved_filter_path_for_debug)
+                        _process_rules_from_stream(f_stream, fallback_path_str)
                     resource_found_and_processed = True
-                else:
-                     print(f"DEBUG: Filter file also not found at last resort relative path '{fallback_path_str}'.")
 
-            if not resource_found_and_processed:
-                 print(f"DEBUG: Filter file '{filter_file_name_default}' could not be loaded from any source. Skipping filtering.")
+            return text
 
-            return text # Text is modified in-place by _process_rules_from_stream via nonlocal
+        except Exception:
+            return text
 
-        except FileNotFoundError:
-            print(f"DEBUG: Filter file '{filter_file_name_default}' not found in package '{package_name}' via importlib.resources. Skipping filtering.")
-        except ModuleNotFoundError:
-            print(f"DEBUG: Package '{package_name}' not found by importlib.resources. Skipping filtering.")
-        except Exception as e_pkg:
-            # Corrected f-string
-            print(f"DEBUG: Error loading filter file from package '{package_name}' via importlib.resources: {e_pkg}")
-            traceback.print_exc()
-
+    except Exception:
         return text
-
-    except Exception as e_outer:
-        # Corrected f-string, using the most up-to-date path string for debug
-        print(f"ERROR: Outer error in apply_filters (attempted path: '{resolved_filter_path_for_debug}'): {e_outer}")
-
-
-

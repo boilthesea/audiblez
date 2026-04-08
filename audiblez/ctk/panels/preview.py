@@ -43,27 +43,37 @@ class PreviewPanel(ctk.CTkFrame):
         def generate_preview():
             try:
                 import audiblez.core as core
-                from kokoro import KPipeline
+                import audiblez.engines as engines
                 
                 # Get settings from controller/params
                 voice_data = self.controller.params.voice_var.get().split(' ')
                 # Handle potential flag in first index
                 voice = " ".join(voice_data[1:]) if len(voice_data) > 1 else voice_data[0]
                 
-                speed = float(self.controller.params.speed_var.get())
-                engine = self.controller.params.engine_var.get()
+                speed = float(self.controller.params.speed_var.get() or 1.0)
+                engine_device = self.controller.params.engine_var.get()
+                tts_model = self.controller.params.model_var.get()
+                ref_wav = self.controller.params.ref_wav_var.get()
+                steps = int(self.controller.params.steps_var.get() or 4)
+                chunk_len = int(self.controller.params.chunk_var.get() or 900)
                 
-                pipeline = KPipeline(lang_code=voice[0], device=engine) 
+                active_engine = engines.get_engine(tts_model, engine_device)
                 core.load_spacy()
                 
-                audio_segments = core.gen_audio_segments(pipeline, text, voice=voice, speed=speed)
-                if not audio_segments:
-                    return
+                engine_kwargs = {
+                    'voice': voice,
+                    'speed': speed,
+                    'reference_wav': ref_wav,
+                    'num_steps': steps,
+                    'max_chunk_len': chunk_len
+                }
                 
-                final_audio = np.concatenate(audio_segments)
-                with NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
-                    soundfile.write(tmp.name, final_audio, core.sample_rate)
-                    subprocess.run(['ffplay', '-autoexit', '-nodisp', tmp.name])
+                audio_data, current_sample_rate = active_engine.generate(text, **engine_kwargs)
+                
+                if audio_data.size > 0:
+                    with NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
+                        soundfile.write(tmp.name, audio_data, current_sample_rate)
+                        subprocess.run(['ffplay', '-autoexit', '-nodisp', tmp.name])
             except Exception as e:
                 print(f"Preview error: {e}")
             finally:

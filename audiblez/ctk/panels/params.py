@@ -12,14 +12,21 @@ class ParamsPanel(ctk.CTkFrame):
         self.label = ctk.CTkLabel(self, text="Audiobook Parameters", font=("Inter", 16, "bold"))
         self.label.grid(row=0, column=0, columnspan=2, sticky="nw", padx=10, pady=5)
 
+        # Model Selection (Kokoro vs LuxTTS)
+        ctk.CTkLabel(self, text="Model:").grid(row=1, column=0, sticky="w", padx=10, pady=5)
+        self.model_var = ctk.StringVar(value=self.controller.user_settings.get('tts_model', 'kokoro'))
+        self.model_switch = ctk.CTkSegmentedButton(self, values=["kokoro", "luxtts"], 
+                                                   variable=self.model_var, command=self.on_model_change)
+        self.model_switch.grid(row=1, column=1, sticky="ew", padx=10, pady=5)
+
         # Engine
-        ctk.CTkLabel(self, text="Engine:").grid(row=1, column=0, sticky="w", padx=10, pady=5)
+        ctk.CTkLabel(self, text="Engine:").grid(row=2, column=0, sticky="w", padx=10, pady=5)
         self.engine_var = ctk.StringVar(value=self.controller.user_settings.get('engine', 'cpu'))
         self.engine_switch = ctk.CTkSegmentedButton(self, values=["cpu", "cuda"], variable=self.engine_var, command=self.on_engine_change)
-        self.engine_switch.grid(row=1, column=1, sticky="ew", padx=10, pady=5)
+        self.engine_switch.grid(row=2, column=1, sticky="ew", padx=10, pady=5)
 
-        # Voice
-        ctk.CTkLabel(self, text="Voice:").grid(row=2, column=0, sticky="w", padx=10, pady=5)
+        # --- Kokoro Specific ---
+        self.voice_label = ctk.CTkLabel(self, text="Voice:")
         self.voice_list = []
         for code, l in voices.items():
             for v in l:
@@ -31,53 +38,92 @@ class ParamsPanel(ctk.CTkFrame):
             
         self.voice_var = ctk.StringVar(value=saved_voice)
         self.voice_dropdown = ctk.CTkOptionMenu(self, values=self.voice_list, variable=self.voice_var, command=self.on_voice_change)
-        self.voice_dropdown.grid(row=2, column=1, sticky="ew", padx=10, pady=5)
+
+        # --- LuxTTS Specific ---
+        self.ref_wav_label = ctk.CTkLabel(self, text="Ref WAV:")
+        self.ref_wav_var = ctk.StringVar(value=self.controller.user_settings.get('luxtts_reference_wav', ''))
+        self.ref_wav_entry = ctk.CTkEntry(self, textvariable=self.ref_wav_var)
+        self.ref_wav_btn = ctk.CTkButton(self, text="📂", width=30, command=self.select_ref_wav)
+
+        self.steps_label = ctk.CTkLabel(self, text="Steps:")
+        self.steps_var = ctk.StringVar(value=str(self.controller.user_settings.get('luxtts_num_steps', 4)))
+        self.steps_entry = ctk.CTkEntry(self, textvariable=self.steps_var)
+        self.steps_entry.bind("<KeyRelease>", self.on_steps_change)
+
+        self.chunk_label = ctk.CTkLabel(self, text="Chunk Len:")
+        self.chunk_var = ctk.StringVar(value=str(self.controller.user_settings.get('luxtts_max_chunk_len', 900)))
+        self.chunk_entry = ctk.CTkEntry(self, textvariable=self.chunk_var)
+        self.chunk_entry.bind("<KeyRelease>", self.on_chunk_change)
 
         # Speed
-        ctk.CTkLabel(self, text="Speed:").grid(row=3, column=0, sticky="w", padx=10, pady=5)
+        ctk.CTkLabel(self, text="Speed:").grid(row=6, column=0, sticky="w", padx=10, pady=5)
         self.speed_var = ctk.StringVar(value=str(self.controller.user_settings.get('speed', 1.0)))
         self.speed_entry = ctk.CTkEntry(self, textvariable=self.speed_var)
-        self.speed_entry.grid(row=3, column=1, sticky="ew", padx=10, pady=5)
+        self.speed_entry.grid(row=6, column=1, sticky="ew", padx=10, pady=5)
         self.speed_entry.bind("<KeyRelease>", self.on_speed_change)
 
         # Custom Rate
-        ctk.CTkLabel(self, text="Custom Rate:").grid(row=4, column=0, sticky="w", padx=10, pady=5)
+        ctk.CTkLabel(self, text="Custom Rate:").grid(row=7, column=0, sticky="w", padx=10, pady=5)
         self.rate_var = ctk.StringVar(value=str(self.controller.user_settings.get('custom_rate', '')))
         self.rate_entry = ctk.CTkEntry(self, textvariable=self.rate_var, placeholder_text="chars/sec (experimental)")
-        self.rate_entry.grid(row=4, column=1, sticky="ew", padx=10, pady=5)
+        self.rate_entry.grid(row=7, column=1, sticky="ew", padx=10, pady=5)
         self.rate_entry.bind("<KeyRelease>", self.on_rate_change)
 
         # Output Folder
-        ctk.CTkLabel(self, text="Output:").grid(row=5, column=0, sticky="w", padx=10, pady=5)
+        ctk.CTkLabel(self, text="Output:").grid(row=8, column=0, sticky="w", padx=10, pady=5)
         self.output_path = ctk.CTkEntry(self)
-        self.output_path.grid(row=5, column=1, sticky="ew", padx=(10, 80), pady=5)
+        self.output_path.grid(row=8, column=1, sticky="ew", padx=(10, 80), pady=5)
         
         saved_output = self.controller.user_settings.get('output_folder', '')
         if saved_output:
             self.output_path.insert(0, saved_output)
             
         self.output_btn = ctk.CTkButton(self, text="📂", width=60, command=self.select_output)
-        self.output_btn.grid(row=5, column=1, sticky="e", padx=(0, 10), pady=5)
+        self.output_btn.grid(row=8, column=1, sticky="e", padx=(0, 10), pady=5)
 
         # M4B Assembly
-        ctk.CTkLabel(self, text="M4B Assembly:").grid(row=6, column=0, sticky="w", padx=10, pady=5)
+        ctk.CTkLabel(self, text="M4B Assembly:").grid(row=9, column=0, sticky="w", padx=10, pady=5)
         self.m4b_var = ctk.StringVar(value=self.controller.user_settings.get('m4b_assembly_method', 'original'))
-        self.m4b_switch = ctk.CTkSegmentedButton(self, values=["original", "crispy"], variable=self.m4b_var, command=self.on_m4b_change)
-        # Use a list of labels to map to the values
-        self.m4b_switch.configure(values=["original", "crispy"]) # These are internal values
-        # Actually segmented button in CTK uses the values as display text.
-        # I'll use a wrapper to show better labels if needed, but for now I'll use simple mapping or just use labels.
-        # User said: "frontend we'll continue to display it as 'extra crispy'"
-        # I will use a dictionary to map labels to values if needed, but CTK segmented button is direct.
-        # Let's use a workaround:
-        self.m4b_switch.configure(values=["Original", "Extra Crispy"])
-        # And handle the mapping in on_m4b_change
-        display_to_val = {"Original": "original", "Extra Crispy": "crispy"}
+        self.m4b_switch = ctk.CTkSegmentedButton(self, values=["Original", "Extra Crispy"], variable=self.m4b_var, command=self.on_m4b_change)
+        
         val_to_display = {"original": "Original", "crispy": "Extra Crispy"}
         current_val = self.controller.user_settings.get('m4b_assembly_method', 'original')
         self.m4b_var.set(val_to_display.get(current_val, "Original"))
-        self.m4b_switch.grid(row=6, column=1, sticky="ew", padx=10, pady=5)
+        self.m4b_switch.grid(row=9, column=1, sticky="ew", padx=10, pady=5)
 
+        # Initialize visibility
+        self.refresh_model_visibility()
+
+    def refresh_model_visibility(self):
+        model = self.model_var.get()
+        # Hide all dynamic rows first
+        self.voice_label.grid_forget()
+        self.voice_dropdown.grid_forget()
+        self.ref_wav_label.grid_forget()
+        self.ref_wav_entry.grid_forget()
+        self.ref_wav_btn.grid_forget()
+        self.steps_label.grid_forget()
+        self.steps_entry.grid_forget()
+        self.chunk_label.grid_forget()
+        self.chunk_entry.grid_forget()
+
+        if model == "kokoro":
+            self.voice_label.grid(row=3, column=0, sticky="w", padx=10, pady=5)
+            self.voice_dropdown.grid(row=3, column=1, sticky="ew", padx=10, pady=5)
+        else: # luxtts
+            self.ref_wav_label.grid(row=3, column=0, sticky="w", padx=10, pady=5)
+            self.ref_wav_entry.grid(row=3, column=1, sticky="ew", padx=(10, 50), pady=5)
+            self.ref_wav_btn.grid(row=3, column=1, sticky="e", padx=(0, 10), pady=5)
+            
+            self.steps_label.grid(row=4, column=0, sticky="w", padx=10, pady=5)
+            self.steps_entry.grid(row=4, column=1, sticky="ew", padx=10, pady=5)
+            
+            self.chunk_label.grid(row=5, column=0, sticky="w", padx=10, pady=5)
+            self.chunk_entry.grid(row=5, column=1, sticky="ew", padx=10, pady=5)
+
+    def on_model_change(self, value):
+        db.save_user_setting('tts_model', value)
+        self.refresh_model_visibility()
 
     def on_engine_change(self, value):
         db.save_user_setting('engine', value)
@@ -111,6 +157,25 @@ class ParamsPanel(ctk.CTkFrame):
         except ValueError:
             pass
 
+    def on_steps_change(self, event):
+        try:
+            val = int(self.steps_entry.get())
+            db.save_user_setting('luxtts_num_steps', val)
+        except ValueError:
+            pass
+
+    def on_chunk_change(self, event):
+        try:
+            val = int(self.chunk_entry.get())
+            db.save_user_setting('luxtts_max_chunk_len', val)
+        except ValueError:
+            pass
+
+    def select_ref_wav(self):
+        file_path = ctk.filedialog.askopenfilename(filetypes=[("WAV files", "*.wav")])
+        if file_path:
+            self.ref_wav_var.set(file_path)
+            db.save_user_setting('luxtts_reference_wav', file_path)
 
     def select_output(self):
         folder = ctk.filedialog.askdirectory()
@@ -118,4 +183,3 @@ class ParamsPanel(ctk.CTkFrame):
             self.output_path.delete(0, "end")
             self.output_path.insert(0, folder)
             db.save_user_setting('output_folder', folder)
-

@@ -187,7 +187,12 @@ class ChaptersTab(ctk.CTkFrame):
             'voice': voice,
             'speed': speed,
             'output_folder': output_folder,
-            'm4b_assembly_method': m4b_method
+            'm4b_assembly_method': m4b_method,
+            'tts_model': self.controller.params.model_var.get(),
+            'luxtts_reference_wav': self.controller.params.ref_wav_var.get(),
+            'luxtts_num_steps': int(self.controller.params.steps_var.get() or 4),
+            'luxtts_max_chunk_len': int(self.controller.params.chunk_var.get() or 900),
+            'custom_rate': self.controller.params.rate_var.get()
         }
 
         # Prepare chapters for DB
