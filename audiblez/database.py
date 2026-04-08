@@ -53,7 +53,8 @@ def create_tables(conn: sqlite3.Connection):
             output_folder TEXT,
             tts_model TEXT DEFAULT 'kokoro',
             luxtts_reference_wav TEXT,
-            luxtts_num_steps INTEGER DEFAULT 4
+            luxtts_num_steps INTEGER DEFAULT 4,
+            luxtts_max_chunk_len INTEGER DEFAULT 900
         )
     """)
 
@@ -75,7 +76,7 @@ def create_tables(conn: sqlite3.Connection):
         cursor.execute("ALTER TABLE user_settings ADD COLUMN window_geometry TEXT")
     except sqlite3.OperationalError as e:
         if "duplicate column name" in str(e).lower():
-            pass  # Column already exists
+            pass  # Column already exists, which is fine
         else:
             raise
 
@@ -199,7 +200,7 @@ def save_user_setting(setting_name: str, setting_value):
     conn = connect_db()
     cursor = conn.cursor()
     try:
-        valid_columns = ["engine", "voice", "speed", "custom_rate", "next_scheduled_run", "calibre_ebook_convert_path", "m4b_assembly_method", "dark_mode", "window_geometry", "output_folder", "tts_model", "luxtts_reference_wav", "luxtts_num_steps"]
+        valid_columns = ["engine", "voice", "speed", "custom_rate", "next_scheduled_run", "calibre_ebook_convert_path", "m4b_assembly_method", "dark_mode", "window_geometry", "output_folder", "tts_model", "luxtts_reference_wav", "luxtts_num_steps", "luxtts_max_chunk_len"]
         if setting_name not in valid_columns:
             print(f"Error: Invalid setting_name '{setting_name}' for update/insert.")
             return
@@ -224,7 +225,7 @@ def load_user_setting(setting_name: str):
     conn = connect_db()
     cursor = conn.cursor()
     try:
-        valid_columns = ["engine", "voice", "speed", "custom_rate", "next_scheduled_run", "calibre_ebook_convert_path", "m4b_assembly_method", "dark_mode", "window_geometry", "output_folder", "tts_model", "luxtts_reference_wav", "luxtts_num_steps"]
+        valid_columns = ["engine", "voice", "speed", "custom_rate", "next_scheduled_run", "calibre_ebook_convert_path", "m4b_assembly_method", "dark_mode", "window_geometry", "output_folder", "tts_model", "luxtts_reference_wav", "luxtts_num_steps", "luxtts_max_chunk_len"]
         if setting_name not in valid_columns:
             print(f"Error: Invalid setting_name '{setting_name}' for load.")
             return None
@@ -251,7 +252,7 @@ def load_all_user_settings() -> dict:
     cursor = conn.cursor()
     settings = {}
     try:
-        cursor.execute("SELECT engine, voice, speed, custom_rate, next_scheduled_run, calibre_ebook_convert_path, m4b_assembly_method, dark_mode, window_geometry, output_folder, tts_model, luxtts_reference_wav, luxtts_num_steps FROM user_settings WHERE id = 1")
+        cursor.execute("SELECT engine, voice, speed, custom_rate, next_scheduled_run, calibre_ebook_convert_path, m4b_assembly_method, dark_mode, window_geometry, output_folder, tts_model, luxtts_reference_wav, luxtts_num_steps, luxtts_max_chunk_len FROM user_settings WHERE id = 1")
         row = cursor.fetchone()
         if row:
             settings = {
@@ -268,6 +269,7 @@ def load_all_user_settings() -> dict:
                 "tts_model": row[10],
                 "luxtts_reference_wav": row[11],
                 "luxtts_num_steps": row[12],
+                "luxtts_max_chunk_len": row[13],
             }
         return settings
     except sqlite3.Error as e:
