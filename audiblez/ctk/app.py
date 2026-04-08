@@ -219,11 +219,13 @@ class AudiblezApp(ctk.CTk):
         display_to_val = {"Original": "original", "Extra Crispy": "crispy"}
         m4b_val = display_to_val.get(m4b_display, "original")
         
+        effective_seed = self.params.get_effective_seed()
+
         params = {
             'file_path': self.selected_file_path,
             'voice': voice,
             'pick_manually': False,
-            'speed': float(self.params.speed_var.get() or 1.0),
+            'speed': float(self.params.lux_speed_var.get() if self.params.model_var.get() == 'luxtts' else self.params.speed_var.get() or 1.0),
             'engine_device': self.params.engine_var.get(),
             'output_folder': self.params.output_path.get() or ".",
             'selected_chapters': [c for i, c in enumerate(self.current_book['chapters']) if self.chapters_tab.chapter_vars[i].get()],
@@ -232,7 +234,13 @@ class AudiblezApp(ctk.CTk):
             'tts_model': self.params.model_var.get(),
             'reference_wav': self.params.ref_wav_var.get(),
             'num_steps': int(self.params.steps_var.get() or 4),
-            'max_chunk_len': int(self.params.chunk_var.get() or 900)
+            'max_chunk_len': int(self.params.chunk_var.get() or 900),
+            'guidance_scale': float(self.params.guidance_var.get()),
+            't_shift': float(self.params.t_shift_var.get()),
+            'rms': float(self.params.rms_var.get()),
+            'duration': float(self.params.duration_var.get()),
+            'return_smooth': self.params.smooth_var.get(),
+            'seed': effective_seed
         }
 
         self.synth_thread = CoreThread(params, self.handle_core_event)
@@ -283,7 +291,7 @@ class AudiblezApp(ctk.CTk):
             'file_path': item['source_path'],
             'voice': voice,
             'pick_manually': False,
-            'speed': float(settings.get('speed', 1.0)),
+            'speed': float(settings.get('luxtts_speed') if settings.get('tts_model') == 'luxtts' else settings.get('speed', 1.0)),
             'engine_device': settings.get('engine'),
             'output_folder': settings.get('output_folder') or ".",
             'selected_chapters': selected_chapters,
@@ -292,7 +300,13 @@ class AudiblezApp(ctk.CTk):
             'tts_model': settings.get('tts_model', 'kokoro'),
             'reference_wav': settings.get('luxtts_reference_wav'),
             'num_steps': int(settings.get('luxtts_num_steps', 4)),
-            'max_chunk_len': int(settings.get('luxtts_max_chunk_len', 900))
+            'max_chunk_len': int(settings.get('luxtts_max_chunk_len', 900)),
+            'guidance_scale': float(settings.get('luxtts_guidance', 3.0)),
+            't_shift': float(settings.get('luxtts_t_shift', 0.5)),
+            'rms': float(settings.get('luxtts_rms', 0.1)),
+            'duration': float(settings.get('luxtts_duration', 5.0)),
+            'return_smooth': bool(settings.get('luxtts_smooth', False)),
+            'seed': settings.get('luxtts_seed')
         }
 
 

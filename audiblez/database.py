@@ -54,7 +54,14 @@ def create_tables(conn: sqlite3.Connection):
             tts_model TEXT DEFAULT 'kokoro',
             luxtts_reference_wav TEXT,
             luxtts_num_steps INTEGER DEFAULT 4,
-            luxtts_max_chunk_len INTEGER DEFAULT 900
+            luxtts_max_chunk_len INTEGER DEFAULT 900,
+            luxtts_guidance REAL DEFAULT 3.0,
+            luxtts_t_shift REAL DEFAULT 0.5,
+            luxtts_rms REAL DEFAULT 0.1,
+            luxtts_duration REAL DEFAULT 5.0,
+            luxtts_smooth BOOLEAN DEFAULT 0,
+            luxtts_seed INTEGER,
+            luxtts_seed_locked BOOLEAN DEFAULT 0
         )
     """)
 
@@ -124,6 +131,23 @@ def create_tables(conn: sqlite3.Connection):
             pass
         else:
             raise
+
+    # Add advanced LuxTTS parameters for backward compatibility
+    advanced_cols = {
+        "luxtts_guidance": "REAL DEFAULT 3.0",
+        "luxtts_t_shift": "REAL DEFAULT 0.5",
+        "luxtts_rms": "REAL DEFAULT 0.1",
+        "luxtts_duration": "REAL DEFAULT 5.0",
+        "luxtts_smooth": "BOOLEAN DEFAULT 0",
+        "luxtts_seed": "INTEGER",
+        "luxtts_seed_locked": "BOOLEAN DEFAULT 0"
+    }
+    for col, definition in advanced_cols.items():
+        try:
+            cursor.execute(f"ALTER TABLE user_settings ADD COLUMN {col} {definition}")
+        except sqlite3.OperationalError as e:
+            if "duplicate column name" not in str(e).lower():
+                raise
 
     # Staged Books Table
     cursor.execute("""
@@ -200,7 +224,14 @@ def save_user_setting(setting_name: str, setting_value):
     conn = connect_db()
     cursor = conn.cursor()
     try:
-        valid_columns = ["engine", "voice", "speed", "custom_rate", "next_scheduled_run", "calibre_ebook_convert_path", "m4b_assembly_method", "dark_mode", "window_geometry", "output_folder", "tts_model", "luxtts_reference_wav", "luxtts_num_steps", "luxtts_max_chunk_len"]
+        valid_columns = [
+            "engine", "voice", "speed", "custom_rate", "next_scheduled_run", 
+            "calibre_ebook_convert_path", "m4b_assembly_method", "dark_mode", 
+            "window_geometry", "output_folder", "tts_model", "luxtts_reference_wav", 
+            "luxtts_num_steps", "luxtts_max_chunk_len", "luxtts_guidance", 
+            "luxtts_t_shift", "luxtts_rms", "luxtts_duration", "luxtts_smooth", 
+            "luxtts_seed", "luxtts_seed_locked"
+        ]
         if setting_name not in valid_columns:
             print(f"Error: Invalid setting_name '{setting_name}' for update/insert.")
             return
@@ -225,7 +256,14 @@ def load_user_setting(setting_name: str):
     conn = connect_db()
     cursor = conn.cursor()
     try:
-        valid_columns = ["engine", "voice", "speed", "custom_rate", "next_scheduled_run", "calibre_ebook_convert_path", "m4b_assembly_method", "dark_mode", "window_geometry", "output_folder", "tts_model", "luxtts_reference_wav", "luxtts_num_steps", "luxtts_max_chunk_len"]
+        valid_columns = [
+            "engine", "voice", "speed", "custom_rate", "next_scheduled_run", 
+            "calibre_ebook_convert_path", "m4b_assembly_method", "dark_mode", 
+            "window_geometry", "output_folder", "tts_model", "luxtts_reference_wav", 
+            "luxtts_num_steps", "luxtts_max_chunk_len", "luxtts_guidance", 
+            "luxtts_t_shift", "luxtts_rms", "luxtts_duration", "luxtts_smooth", 
+            "luxtts_seed", "luxtts_seed_locked"
+        ]
         if setting_name not in valid_columns:
             print(f"Error: Invalid setting_name '{setting_name}' for load.")
             return None
@@ -252,7 +290,15 @@ def load_all_user_settings() -> dict:
     cursor = conn.cursor()
     settings = {}
     try:
-        cursor.execute("SELECT engine, voice, speed, custom_rate, next_scheduled_run, calibre_ebook_convert_path, m4b_assembly_method, dark_mode, window_geometry, output_folder, tts_model, luxtts_reference_wav, luxtts_num_steps, luxtts_max_chunk_len FROM user_settings WHERE id = 1")
+        cursor.execute("""
+            SELECT engine, voice, speed, custom_rate, next_scheduled_run, 
+                   calibre_ebook_convert_path, m4b_assembly_method, dark_mode, 
+                   window_geometry, output_folder, tts_model, luxtts_reference_wav, 
+                   luxtts_num_steps, luxtts_max_chunk_len, luxtts_guidance, 
+                   luxtts_t_shift, luxtts_rms, luxtts_duration, luxtts_smooth, 
+                   luxtts_seed, luxtts_seed_locked 
+            FROM user_settings WHERE id = 1
+        """)
         row = cursor.fetchone()
         if row:
             settings = {
@@ -270,6 +316,13 @@ def load_all_user_settings() -> dict:
                 "luxtts_reference_wav": row[11],
                 "luxtts_num_steps": row[12],
                 "luxtts_max_chunk_len": row[13],
+                "luxtts_guidance": row[14],
+                "luxtts_t_shift": row[15],
+                "luxtts_rms": row[16],
+                "luxtts_duration": row[17],
+                "luxtts_smooth": bool(row[18]),
+                "luxtts_seed": row[19],
+                "luxtts_seed_locked": bool(row[20]),
             }
         return settings
     except sqlite3.Error as e:

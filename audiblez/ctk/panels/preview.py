@@ -50,13 +50,21 @@ class PreviewPanel(ctk.CTkFrame):
                 # Handle potential flag in first index
                 voice = " ".join(voice_data[1:]) if len(voice_data) > 1 else voice_data[0]
                 
-                speed = float(self.controller.params.speed_var.get() or 1.0)
                 engine_device = self.controller.params.engine_var.get()
                 tts_model = self.controller.params.model_var.get()
                 ref_wav = self.controller.params.ref_wav_var.get()
                 steps = int(self.controller.params.steps_var.get() or 4)
                 chunk_len = int(self.controller.params.chunk_var.get() or 900)
                 
+                # Use get_effective_seed to handle random vs locked
+                effective_seed = self.controller.params.get_effective_seed()
+                
+                # LuxTTS specifically uses lux_speed slider
+                if tts_model == 'luxtts':
+                    speed = float(self.controller.params.lux_speed_var.get())
+                else:
+                    speed = float(self.controller.params.speed_var.get() or 1.0)
+
                 active_engine = engines.get_engine(tts_model, engine_device)
                 core.load_spacy()
                 
@@ -65,7 +73,13 @@ class PreviewPanel(ctk.CTkFrame):
                     'speed': speed,
                     'reference_wav': ref_wav,
                     'num_steps': steps,
-                    'max_chunk_len': chunk_len
+                    'max_chunk_len': chunk_len,
+                    'guidance_scale': float(self.controller.params.guidance_var.get()),
+                    't_shift': float(self.controller.params.t_shift_var.get()),
+                    'rms': float(self.controller.params.rms_var.get()),
+                    'duration': float(self.controller.params.duration_var.get()),
+                    'return_smooth': self.controller.params.smooth_var.get(),
+                    'seed': effective_seed
                 }
                 
                 audio_data, current_sample_rate = active_engine.generate(text, **engine_kwargs)
