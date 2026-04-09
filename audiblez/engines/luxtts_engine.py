@@ -105,5 +105,4 @@ class LuxTTSEngine(BaseEngine):
         if not all_audio:
             return np.array([]), 48000
             
-        final_sample_rate = 24000 if return_smooth else 48000
-        return np.concatenate(all_audio), final_sample_rate
+        return np.concatenate(all_audio), 48000

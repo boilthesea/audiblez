@@ -91,7 +91,8 @@ def main(file_path, voice, pick_manually, speed, output_folder='.',
          max_chapters=None, max_sentences=None, selected_chapters=None, post_event=None,
          calibre_metadata: dict | None = None, calibre_cover_image_path: str | None = None,
          m4b_assembly_method: str = 'original', engine_device=None, custom_rate=None,
-         tts_model='kokoro', reference_wav=None, num_steps=4, max_chunk_len=900):
+         tts_model='kokoro', reference_wav=None, num_steps=4, max_chunk_len=900,
+         guidance_scale=3.0, t_shift=0.5, rms=0.1, duration=5.0, return_smooth=False, seed=None):
 
 
     if post_event: post_event('CORE_STARTED')
@@ -205,7 +206,13 @@ def main(file_path, voice, pick_manually, speed, output_folder='.',
         'speed': speed,
         'reference_wav': reference_wav,
         'num_steps': num_steps,
-        'max_chunk_len': max_chunk_len
+        'max_chunk_len': max_chunk_len,
+        'guidance_scale': guidance_scale,
+        't_shift': t_shift,
+        'rms': rms,
+        'duration': duration,
+        'return_smooth': return_smooth,
+        'seed': seed
     }
 
     chapter_wav_files = []
@@ -317,7 +324,8 @@ def print_selected_chapters(document_chapters, chapters):
 
 
 def gen_text(text, voice='af_heart', output_file='text.wav', speed=1, play=False, engine_device=None,
-             tts_model='kokoro', reference_wav=None, num_steps=4, max_chunk_len=900):
+             tts_model='kokoro', reference_wav=None, num_steps=4, max_chunk_len=900,
+             guidance_scale=3.0, t_shift=0.5, rms=0.1, duration=5.0, return_smooth=False, seed=None):
     load_spacy()
     set_espeak_library()
     active_engine = engines.get_engine(tts_model, engine_device)
@@ -326,7 +334,13 @@ def gen_text(text, voice='af_heart', output_file='text.wav', speed=1, play=False
         'speed': speed,
         'reference_wav': reference_wav,
         'num_steps': num_steps,
-        'max_chunk_len': max_chunk_len
+        'max_chunk_len': max_chunk_len,
+        'guidance_scale': guidance_scale,
+        't_shift': t_shift,
+        'rms': rms,
+        'duration': duration,
+        'return_smooth': return_smooth,
+        'seed': seed
     }
     audio_data, current_sample_rate = active_engine.generate(text, **engine_kwargs)
     if audio_data.size > 0:

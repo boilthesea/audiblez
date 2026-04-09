@@ -63,9 +63,18 @@ class ParamsPanel(ctk.CTkFrame):
         self.t_shift_val_label = ctk.CTkLabel(self.lux_container, text=f"{self.t_shift_var.get():.1f}", width=30)
 
         # Lux Speed Slider (0.5 - 2.0)
-        self.lux_speed_label = ctk.CTkLabel(self.lux_container, text="Speed (Lux):")
+        self.lux_speed_label = ctk.CTkLabel(self.lux_container, text="Speed:")
         self.lux_speed_var = ctk.DoubleVar(value=float(self.controller.user_settings.get('luxtts_speed', 1.0)))
-        self.lux_speed_slider = ctk.CTkSlider(self.lux_container, from_=0.5, to=2.0, variable=self.lux_speed_var, command=lambda v: self.on_slider_change('luxtts_speed', v))
+        
+        self.speed_slider_frame = ctk.CTkFrame(self.lux_container, fg_color="transparent")
+        self.lux_speed_slider = ctk.CTkSlider(self.speed_slider_frame, from_=0.5, to=2.0, variable=self.lux_speed_var, command=lambda v: self.on_slider_change('luxtts_speed', v))
+        self.lux_speed_slower = ctk.CTkLabel(self.speed_slider_frame, text="Slower", font=("Inter", 10))
+        self.lux_speed_faster = ctk.CTkLabel(self.speed_slider_frame, text="Faster", font=("Inter", 10))
+        
+        self.lux_speed_slower.pack(side="left")
+        self.lux_speed_slider.pack(side="left", expand=True, fill="x", padx=5)
+        self.lux_speed_faster.pack(side="left")
+        
         self.lux_speed_val_label = ctk.CTkLabel(self.lux_container, text=f"{self.lux_speed_var.get():.1f}", width=30)
 
         # RMS Slider (0.0 - 2.0)
@@ -117,7 +126,7 @@ class ParamsPanel(ctk.CTkFrame):
         self.t_shift_val_label.grid(row=2, column=2, sticky="w", padx=5, pady=2)
 
         self.lux_speed_label.grid(row=3, column=0, sticky="w", padx=5, pady=2)
-        self.lux_speed_slider.grid(row=3, column=1, sticky="ew", padx=5, pady=2)
+        self.speed_slider_frame.grid(row=3, column=1, sticky="ew", padx=5, pady=2)
         self.lux_speed_val_label.grid(row=3, column=2, sticky="w", padx=5, pady=2)
 
         self.rms_label.grid(row=4, column=0, sticky="w", padx=5, pady=2)
@@ -253,9 +262,6 @@ class ParamsPanel(ctk.CTkFrame):
         self.seed_locked_var.set(locked)
         self.seed_lock_btn.configure(text="🔒" if locked else "🔓")
         db.save_user_setting('luxtts_seed_locked', locked)
-        if not locked:
-            # Optionally clear seed or leave it? User might want to keep the "good" seed visible.
-            pass
 
     def get_effective_seed(self):
         """Called by preview or synthesis to determine the seed to use."""

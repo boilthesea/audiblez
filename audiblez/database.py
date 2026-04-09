@@ -57,6 +57,7 @@ def create_tables(conn: sqlite3.Connection):
             luxtts_max_chunk_len INTEGER DEFAULT 900,
             luxtts_guidance REAL DEFAULT 3.0,
             luxtts_t_shift REAL DEFAULT 0.5,
+            luxtts_speed REAL DEFAULT 1.0,
             luxtts_rms REAL DEFAULT 0.1,
             luxtts_duration REAL DEFAULT 5.0,
             luxtts_smooth BOOLEAN DEFAULT 0,
@@ -136,6 +137,7 @@ def create_tables(conn: sqlite3.Connection):
     advanced_cols = {
         "luxtts_guidance": "REAL DEFAULT 3.0",
         "luxtts_t_shift": "REAL DEFAULT 0.5",
+        "luxtts_speed": "REAL DEFAULT 1.0",
         "luxtts_rms": "REAL DEFAULT 0.1",
         "luxtts_duration": "REAL DEFAULT 5.0",
         "luxtts_smooth": "BOOLEAN DEFAULT 0",
@@ -229,8 +231,8 @@ def save_user_setting(setting_name: str, setting_value):
             "calibre_ebook_convert_path", "m4b_assembly_method", "dark_mode", 
             "window_geometry", "output_folder", "tts_model", "luxtts_reference_wav", 
             "luxtts_num_steps", "luxtts_max_chunk_len", "luxtts_guidance", 
-            "luxtts_t_shift", "luxtts_rms", "luxtts_duration", "luxtts_smooth", 
-            "luxtts_seed", "luxtts_seed_locked"
+            "luxtts_t_shift", "luxtts_speed", "luxtts_rms", "luxtts_duration", 
+            "luxtts_smooth", "luxtts_seed", "luxtts_seed_locked"
         ]
         if setting_name not in valid_columns:
             print(f"Error: Invalid setting_name '{setting_name}' for update/insert.")
@@ -261,8 +263,8 @@ def load_user_setting(setting_name: str):
             "calibre_ebook_convert_path", "m4b_assembly_method", "dark_mode", 
             "window_geometry", "output_folder", "tts_model", "luxtts_reference_wav", 
             "luxtts_num_steps", "luxtts_max_chunk_len", "luxtts_guidance", 
-            "luxtts_t_shift", "luxtts_rms", "luxtts_duration", "luxtts_smooth", 
-            "luxtts_seed", "luxtts_seed_locked"
+            "luxtts_t_shift", "luxtts_speed", "luxtts_rms", "luxtts_duration", 
+            "luxtts_smooth", "luxtts_seed", "luxtts_seed_locked"
         ]
         if setting_name not in valid_columns:
             print(f"Error: Invalid setting_name '{setting_name}' for load.")
@@ -295,8 +297,8 @@ def load_all_user_settings() -> dict:
                    calibre_ebook_convert_path, m4b_assembly_method, dark_mode, 
                    window_geometry, output_folder, tts_model, luxtts_reference_wav, 
                    luxtts_num_steps, luxtts_max_chunk_len, luxtts_guidance, 
-                   luxtts_t_shift, luxtts_rms, luxtts_duration, luxtts_smooth, 
-                   luxtts_seed, luxtts_seed_locked 
+                   luxtts_t_shift, luxtts_speed, luxtts_rms, luxtts_duration, 
+                   luxtts_smooth, luxtts_seed, luxtts_seed_locked 
             FROM user_settings WHERE id = 1
         """)
         row = cursor.fetchone()
@@ -318,11 +320,12 @@ def load_all_user_settings() -> dict:
                 "luxtts_max_chunk_len": row[13],
                 "luxtts_guidance": row[14],
                 "luxtts_t_shift": row[15],
-                "luxtts_rms": row[16],
-                "luxtts_duration": row[17],
-                "luxtts_smooth": bool(row[18]),
-                "luxtts_seed": row[19],
-                "luxtts_seed_locked": bool(row[20]),
+                "luxtts_speed": row[16],
+                "luxtts_rms": row[17],
+                "luxtts_duration": row[18],
+                "luxtts_smooth": bool(row[19]),
+                "luxtts_seed": row[20],
+                "luxtts_seed_locked": bool(row[21]),
             }
         return settings
     except sqlite3.Error as e:
@@ -550,7 +553,7 @@ def add_item_to_queue(details: dict) -> int | None:
             'pending', # Initial status
             new_queue_order
         ))
-        queue_item_id = queue_item_id = cursor.lastrowid
+        queue_item_id = cursor.lastrowid
         # print(f"DEBUG_DB: synthesis_queue insert generated queue_item_id: {queue_item_id}")
         if not queue_item_id:
             conn.rollback()
