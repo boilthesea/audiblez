@@ -40,6 +40,9 @@ class LuxTTSEngine(BaseEngine):
         Generates audio using LuxTTS with voice cloning.
         Expected kwargs: reference_wav, num_steps, guidance_scale, t_shift, speed, rms, duration, return_smooth, seed
         """
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            
         reference_wav = kwargs.get('reference_wav')
         if not reference_wav:
             raise ValueError("LuxTTS requires a reference_wav for voice cloning.")
