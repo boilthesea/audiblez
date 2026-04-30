@@ -115,16 +115,25 @@ class AudiblezApp(ctk.CTk):
 
     def _load_book_file_threaded(self, file_path, method=1):
         from audiblez.calibre_handler import open_book_experimental
+        from audiblez.epub_handler import open_book_pure_python
         from pathlib import Path
         import traceback
 
         try:
-            # Use open_book_experimental as it handles all 3 methods uniformly
-            res_method, msg, chapters, metadata, cover_info = open_book_experimental(
-                file_path, 
-                ui_callback_for_path_selection=self._ask_user_for_calibre_path_generic,
-                method=method
-            )
+            # Use open_book_pure_python for Method 1 (Pure Python / Linux Friendly)
+            # Use open_book_experimental for others (Zip, Calibre)
+            if method == 1:
+                print("Parser: Using Pure Python (ebooklib + BeautifulSoup) for EPUB.")
+                res_method, msg, chapters, metadata, cover_info = open_book_pure_python(
+                    file_path, 
+                    include_skeleton=False
+                )
+            else:
+                res_method, msg, chapters, metadata, cover_info = open_book_experimental(
+                    file_path, 
+                    ui_callback_for_path_selection=self._ask_user_for_calibre_path_generic,
+                    method=method
+                )
 
             if not chapters:
                 print(f"Failed to load chapters: {msg}")

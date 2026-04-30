@@ -24,7 +24,7 @@ from pathlib import Path
 from string import Formatter
 from bs4 import BeautifulSoup
 import audiblez.engines as engines # Updated
-from ebooklib import epub
+from audiblez.epub_handler import find_cover, find_document_chapters_and_extract_texts
 from pick import pick
 import importlib.resources # Added for accessing package data files
 import markdown # Added for unmark function

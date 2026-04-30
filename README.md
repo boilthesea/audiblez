@@ -13,7 +13,7 @@ This is a specialized fork of [Claudio Santini's Audiblez](https://github.com/sa
 - 🍗 **Extra Crunchy M4B Assembly**: Improved Windows-specific FFmpeg concatenation for more robust audiobook generation or you can optionally use the original Audiblez M4B assembly.
 - 📚 **Advanced Parsing**: Enhanced EPUB chapter detection with three experimental methods (Standard, Zip, **Calibre-Only**).
 - 🗄️ **Persistent Settings**: SQLite-backed database for user preferences, book staging, and a synthesis queue, with multi-UI support.
-- ⚡ **Expanded Engines**: Built-in support for **Qwen3-TTS** alongside the original Kokoro-82M, with CPU/CUDA selection.
+- ⚡ **Expanded Engines**: Built-in support for **LuxTTS** alongside the original Kokoro-82M, with CPU/CUDA selection.
 - 🛠️ **Windows Stability**: Fixed numerous pathing and process-locking issues common on Windows systems.
 - 🔊 **Audio Preview**: Generate and hear a snippet of any chapter before starting the full conversion.
 - 🔍 **Inspector Debugging**: Generate HTML skeleton reports to debug EPUB parsing issues.
@@ -43,13 +43,12 @@ uv pip install torch torchvision torchaudio --index-url https://download.pytorch
 
 # 3. Install Audiblez in 'editable' mode
 uv pip install -e .
-uv pip install customtkinter pillow wxpython
+uv pip install customtkinter pillow 
 ```
 
 ### Running
 
 - **GUI (Modern)**: `audiblez-ui`
-- **GUI (Legacy)**: `python audiblez/ui_wx.py`
 - **CLI**: `audiblez --help`
 
 ---
