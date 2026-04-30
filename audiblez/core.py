@@ -10,6 +10,7 @@ from glob import glob
 import torch.cuda
 import spacy
 import ebooklib
+from ebooklib import epub
 import soundfile
 import numpy as np
 import time
