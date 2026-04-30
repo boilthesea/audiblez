@@ -76,7 +76,23 @@ def open_book_pure_python(file_path, include_skeleton=False):
         }
         
     # Chapters
-    chapters = find_document_chapters_and_extract_texts(book, include_skeleton=include_skeleton)
+    raw_chapters = find_document_chapters_and_extract_texts(book, include_skeleton=include_skeleton)
+    
+    # Convert EpubHtml objects to dicts for UI consistency
+    chapters = []
+    for c in raw_chapters:
+        chapter_dict = {
+            'title': c.get_name() if hasattr(c, 'get_name') else getattr(c, 'title', 'Chapter'),
+            'extracted_text': getattr(c, 'extracted_text', ''),
+            'chapter_index': getattr(c, 'chapter_index', 0),
+            'pre_chars': getattr(c, 'pre_chars', 0),
+            'post_chars': getattr(c, 'post_chars', 0),
+            'src': getattr(c, 'file_name', ''),
+            'is_selected': True # Default to selected
+        }
+        if include_skeleton and hasattr(c, 'skeleton'):
+            chapter_dict['skeleton'] = c.skeleton
+        chapters.append(chapter_dict)
     
     # Format metadata as expected by the UI/Core
     metadata = {
