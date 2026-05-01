@@ -20,6 +20,7 @@ class AudiblezApp(ctk.CTk):
 
         self.selected_file_path = None
         self.current_parsing_method = 1 # 1: Standard, 2: Zip, 3: Calibre
+        self.failed_methods = set()
         
         # Queue state
         self.queue_running = False
@@ -109,37 +110,35 @@ class AudiblezApp(ctk.CTk):
         file_path = ctk.filedialog.askopenfilename(filetypes=[("EPUB Files", "*.epub")])
         if file_path:
             self.selected_file_path = file_path
-            # Use the method selected in the ChaptersTab if it exists, else default to 1 (Standard)
-            method = getattr(self, 'current_parsing_method', 1)
-            threading.Thread(target=self._load_book_file_threaded, args=(file_path,), kwargs={'method': method}, daemon=True).start()
+            self.failed_methods = set()
+            # Default to None to allow fallback chain
+            threading.Thread(target=self._load_book_file_threaded, args=(file_path,), kwargs={'method': None}, daemon=True).start()
 
-    def _load_book_file_threaded(self, file_path, method=1):
+    def _load_book_file_threaded(self, file_path, method=None):
         from audiblez.calibre_handler import open_book_experimental
         from audiblez.epub_handler import open_book_pure_python
         from pathlib import Path
         import traceback
 
         try:
-            # Use open_book_pure_python for Method 1 (Pure Python / Linux Friendly)
-            # Use open_book_experimental for others (Zip, Calibre)
-            if method == 1:
-                print("Parser: Using Pure Python (ebooklib + BeautifulSoup) for EPUB.")
-                res_method, msg, chapters, metadata, cover_info = open_book_pure_python(
-                    file_path, 
-                    include_skeleton=False
-                )
-            else:
-                res_method, msg, chapters, metadata, cover_info = open_book_experimental(
-                    file_path, 
-                    ui_callback_for_path_selection=self._ask_user_for_calibre_path_generic,
-                    method=method
-                )
+            # We use open_book_experimental for all Calibre-related methods (1, 2, 3)
+            # method=None means try all three in order.
+            res_method, msg, chapters, metadata, cover_info = open_book_experimental(
+                file_path, 
+                ui_callback_for_path_selection=self._ask_user_for_calibre_path_generic,
+                method=method
+            )
 
             if not chapters:
                 print(f"Failed to load chapters: {msg}")
+                if method:
+                    self.failed_methods.add(method)
+                    self.after(0, self.book_details.refresh_reparse_buttons)
                 return
 
-            # Normalize metadata handling (Method 1/2 returns list of tuples, Method 3 returns strings)
+            self.current_parsing_method = res_method
+
+            # Normalize metadata handling
             def get_meta_field(field_name, default):
                 val = metadata.get(field_name)
                 if not val: return default
@@ -167,20 +166,19 @@ class AudiblezApp(ctk.CTk):
             print(f"Loaded: {title} with method {res_method}")
 
         except Exception as e:
-            print(f"Error loading EPUB: {e}")
+            print(f"Error loading book: {e}")
             traceback.print_exc()
 
     def on_open_with_calibre(self):
         file_path = ctk.filedialog.askopenfilename(filetypes=[("Ebook files", "*.epub;*.mobi;*.azw;*.azw3;*.fb2;*.lit;*.pdf"), ("All files", "*.*")])
         if file_path:
             self.selected_file_path = file_path
-            # For Calibre button, we default to Calibre Only (method 3)
-            threading.Thread(target=self._load_book_file_threaded, args=(file_path,), kwargs={'method': 3}, daemon=True).start()
+            self.failed_methods = set()
+            # Use fallback chain (method=None)
+            threading.Thread(target=self._load_book_file_threaded, args=(file_path,), kwargs={'method': None}, daemon=True).start()
 
 
     def _ask_user_for_calibre_path_generic(self):
-        # In CTK we could use a simple message box then dir dialog
-        # For now let's just use the dir dialog directly or assume user knows
         print("Audiblez needs to know where Calibre is installed.")
         path = ctk.filedialog.askdirectory(title="Select Calibre Installation Directory (containing ebook-convert)")
         return path if path else None
@@ -194,6 +192,7 @@ class AudiblezApp(ctk.CTk):
         # Update Book Details
         total_chars = sum(len(c.get('extracted_text', '')) for c in chapters)
         self.book_details.update_book_info(title, author, total_chars, cover_data=cover)
+        self.book_details.refresh_reparse_buttons()
         
         # Update Chapters Tab
         self.chapters_tab.load_chapters(chapters)
@@ -361,7 +360,6 @@ class AudiblezApp(ctk.CTk):
 
     def on_about(self):
         msg = "Audiblez CTK UI\nA modern, dark-mode-only interface for generating audiobooks."
-        # Using a simple Toplevel for About
         top = ctk.CTkToplevel(self)
         top.title("About Audiblez")
         top.geometry("400x200")

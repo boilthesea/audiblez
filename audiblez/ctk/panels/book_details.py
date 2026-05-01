@@ -26,7 +26,9 @@ class BookDetailsPanel(ctk.CTkFrame):
         self.content.grid_rowconfigure(2, weight=0)
         self.content.grid_rowconfigure(3, weight=0)
         self.content.grid_rowconfigure(4, weight=0)
-        self.content.grid_rowconfigure(5, weight=1) # Spacer row
+        self.content.grid_rowconfigure(5, weight=0)
+        self.content.grid_rowconfigure(6, weight=0)
+        self.content.grid_rowconfigure(7, weight=1) # Spacer row
 
         # Cover Image Placeholder
         self.cover_label = ctk.CTkLabel(self.content, text="No Cover Art", width=120, height=180, fg_color="#333333")
@@ -35,22 +37,61 @@ class BookDetailsPanel(ctk.CTkFrame):
         # Metadata
         self.title_label = ctk.CTkLabel(self.content, text="Title: ---", anchor="w")
         self.title_label.grid(row=0, column=1, sticky="ew")
-        self.content.grid_rowconfigure(0, weight=1)
 
         self.author_label = ctk.CTkLabel(self.content, text="Author: ---", anchor="w")
         self.author_label.grid(row=1, column=1, sticky="ew")
-        self.content.grid_rowconfigure(1, weight=1)
 
         self.length_label = ctk.CTkLabel(self.content, text="Total Length: ---", anchor="w")
         self.length_label.grid(row=2, column=1, sticky="ew")
-        self.content.grid_rowconfigure(2, weight=1)
 
         self.selection_label = ctk.CTkLabel(self.content, text="Selection Total: ---", anchor="w", font=("Inter", 12, "bold"))
         self.selection_label.grid(row=3, column=1, sticky="ew")
-        self.content.grid_rowconfigure(3, weight=1)
 
         self.debug_btn = ctk.CTkButton(self.content, text="🔍 Debug Structure", command=self.on_debug)
-        self.debug_btn.grid(row=4, column=1, sticky="ew", pady=(10, 0))
+        self.debug_btn.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+
+        # Reparse Controls
+        self.reparse_label = ctk.CTkLabel(self.content, text="Manual Reparse:", font=("Inter", 12, "bold"))
+        self.reparse_label.grid(row=5, column=0, columnspan=2, sticky="w", pady=(15, 5))
+        
+        self.reparse_frame = ctk.CTkFrame(self.content, fg_color="transparent")
+        self.reparse_frame.grid(row=6, column=0, columnspan=2, sticky="ew")
+        self.reparse_frame.grid_columnconfigure((0, 1, 2), weight=1)
+        
+        self.method1_btn = ctk.CTkButton(self.reparse_frame, text="Method 1", height=24, command=lambda: self.on_reparse(1))
+        self.method1_btn.grid(row=0, column=0, padx=2)
+        
+        self.method2_btn = ctk.CTkButton(self.reparse_frame, text="Method 2", height=24, command=lambda: self.on_reparse(2))
+        self.method2_btn.grid(row=0, column=1, padx=2)
+        
+        self.method3_btn = ctk.CTkButton(self.reparse_frame, text="Method 3", height=24, command=lambda: self.on_reparse(3))
+        self.method3_btn.grid(row=0, column=2, padx=2)
+
+        self.refresh_reparse_buttons()
+
+    def on_reparse(self, method):
+        if not hasattr(self.controller, 'selected_file_path') or not self.controller.selected_file_path:
+            return
+        # Show some feedback
+        print(f"Manually reparsing with Method {method}...")
+        threading.Thread(target=self.controller._load_book_file_threaded, 
+                         args=(self.controller.selected_file_path,), 
+                         kwargs={'method': method}, daemon=True).start()
+
+    def refresh_reparse_buttons(self):
+        current = getattr(self.controller, 'current_parsing_method', 0)
+        failed = getattr(self.controller, 'failed_methods', set())
+        
+        buttons = {1: self.method1_btn, 2: self.method2_btn, 3: self.method3_btn}
+        labels = {1: "Standard", 2: "Zip", 3: "Calibre"}
+        
+        for m, btn in buttons.items():
+            if m == current:
+                btn.configure(state="disabled", fg_color="green", text=f"{labels[m]} ✓")
+            elif m in failed:
+                btn.configure(state="disabled", fg_color="#882222", text=f"{labels[m]} ✗")
+            else:
+                btn.configure(state="normal", fg_color=ctk.ThemeManager.theme["CTkButton"]["fg_color"], text=labels[m])
 
     def on_debug(self):
         if not hasattr(self.controller, 'selected_file_path') or not self.controller.selected_file_path:
@@ -74,7 +115,7 @@ class BookDetailsPanel(ctk.CTkFrame):
                 from audiblez.calibre_handler import open_book_experimental
                 from audiblez.inspector import generate_report
                 
-                method = getattr(self.controller, 'current_parsing_method', 0) + 1
+                method = getattr(self.controller, 'current_parsing_method', 0)
                 
                 result, msg, chapters, metadata, cover = open_book_experimental(
                     file_path,
