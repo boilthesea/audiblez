@@ -111,8 +111,8 @@ class AudiblezApp(ctk.CTk):
         if file_path:
             self.selected_file_path = file_path
             self.failed_methods = set()
-            # Default to None to allow fallback chain
-            threading.Thread(target=self._load_book_file_threaded, args=(file_path,), kwargs={'method': None}, daemon=True).start()
+            # Restore Stable Track (Pure Python)
+            threading.Thread(target=self._load_book_file_threaded, args=(file_path,), kwargs={'method': 'pure'}, daemon=True).start()
 
     def _load_book_file_threaded(self, file_path, method=None):
         from audiblez.calibre_handler import open_book_experimental
@@ -121,17 +121,24 @@ class AudiblezApp(ctk.CTk):
         import traceback
 
         try:
-            # We use open_book_experimental for all Calibre-related methods (1, 2, 3)
-            # method=None means try all three in order.
-            res_method, msg, chapters, metadata, cover_info = open_book_experimental(
-                file_path, 
-                ui_callback_for_path_selection=self._ask_user_for_calibre_path_generic,
-                method=method
-            )
+            # Stable Track: Pure Python (Linux Friendly, No Calibre)
+            if method == 'pure':
+                print("Parser: Using Stable Pure Python (ebooklib + BeautifulSoup) for EPUB.")
+                res_method, msg, chapters, metadata, cover_info = open_book_pure_python(
+                    file_path, 
+                    include_skeleton=False
+                )
+            # Experimental Track: Calibre Fallback System
+            else:
+                res_method, msg, chapters, metadata, cover_info = open_book_experimental(
+                    file_path, 
+                    ui_callback_for_path_selection=self._ask_user_for_calibre_path_generic,
+                    method=method
+                )
 
             if not chapters:
                 print(f"Failed to load chapters: {msg}")
-                if method:
+                if isinstance(method, int):
                     self.failed_methods.add(method)
                     self.after(0, self.book_details.refresh_reparse_buttons)
                 return
@@ -163,7 +170,8 @@ class AudiblezApp(ctk.CTk):
                 chapters=chapters,
                 cover=cover_info
             ))
-            print(f"Loaded: {title} with method {res_method}")
+            method_str = "Stable" if res_method == 1 and method == 'pure' else f"Experimental {res_method}"
+            print(f"Loaded: {title} with {method_str} parser.")
 
         except Exception as e:
             print(f"Error loading book: {e}")
@@ -174,7 +182,7 @@ class AudiblezApp(ctk.CTk):
         if file_path:
             self.selected_file_path = file_path
             self.failed_methods = set()
-            # Use fallback chain (method=None)
+            # Use Experimental Track with Fallback Chain (method=None)
             threading.Thread(target=self._load_book_file_threaded, args=(file_path,), kwargs={'method': None}, daemon=True).start()
 
 
