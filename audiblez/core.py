@@ -24,13 +24,13 @@ from tabulate import tabulate
 from pathlib import Path
 from string import Formatter
 from bs4 import BeautifulSoup
-import audiblez.engines as engines # Updated
+import audiblez.engines as engines
 from audiblez.epub_handler import find_cover, find_document_chapters_and_extract_texts
 from pick import pick
-import importlib.resources # Added for accessing package data files
-import markdown # Added for unmark function
+import importlib.resources
+import markdown
 
-from audiblez.database import load_user_setting # Added
+from audiblez.database import load_user_setting
 
 sample_rate = 24000
 
@@ -217,6 +217,7 @@ def main(file_path, voice, pick_manually, speed, output_folder='.',
     }
 
     chapter_wav_files = []
+    skipped_chapters = []
     for i, chapter in enumerate(selected_chapters, start=1):
         if max_chapters and i > max_chapters: break
         # Access attributes safely as chapter might be a dict (from CTK UI) or an object (EpubHtml/SimpleNamespace)
@@ -259,39 +260,55 @@ def main(file_path, voice, pick_manually, speed, output_folder='.',
         if post_event: post_event('CORE_CHAPTER_STARTED', chapter_index=chapter_index)
         
         # Synthesis using the engine interface
-        audio_data, current_sample_rate = active_engine.generate(filtered_text, **engine_kwargs)
-        
-        if audio_data.size > 0:
-            soundfile.write(chapter_wav_path, audio_data, current_sample_rate)
-            end_time = time.time()
-            delta_seconds = end_time - start_time
-            chars_per_sec = len(text) / delta_seconds
-            print('Chapter written to', chapter_wav_path)
+        try:
+            audio_data, current_sample_rate = active_engine.generate(filtered_text, **engine_kwargs)
             
-            # Progress tracking
-            if stats:
-                stats.processed_chars += len(filtered_text)
-                if stats.total_chars > 0:
-                    stats.progress = int((stats.processed_chars / stats.total_chars) * 100)
-                else:
-                    stats.progress = 100
-                stats.eta = strfdelta((stats.total_chars - stats.processed_chars) / stats.chars_per_sec)
-                if post_event: post_event('CORE_PROGRESS', stats=stats)
-                print(f'Estimated time remaining: {stats.eta}')
-                print('Progress:', f'{stats.progress}%\n')
+            if audio_data.size > 0:
+                soundfile.write(chapter_wav_path, audio_data, current_sample_rate)
+                end_time = time.time()
+                delta_seconds = end_time - start_time
+                chars_per_sec = len(text) / delta_seconds
+                print('Chapter written to', chapter_wav_path)
+                
+                # Progress tracking
+                if stats:
+                    stats.processed_chars += len(filtered_text)
+                    if stats.total_chars > 0:
+                        stats.progress = int((stats.processed_chars / stats.total_chars) * 100)
+                    else:
+                        stats.progress = 100
+                    stats.eta = strfdelta((stats.total_chars - stats.processed_chars) / stats.chars_per_sec)
+                    if post_event: post_event('CORE_PROGRESS', stats=stats)
+                    print(f'Estimated time remaining: {stats.eta}')
+                    print('Progress:', f'{stats.progress}%\n')
 
-            if post_event: post_event('CORE_CHAPTER_FINISHED', chapter_index=chapter_index)
-            print(f'Chapter {i} read in {delta_seconds:.2f} seconds ({chars_per_sec:.0f} characters per second)')
-        else:
-            print(f'Warning: No audio generated for chapter {i}')
-            chapter_wav_files.remove(chapter_wav_path)
+                if post_event: post_event('CORE_CHAPTER_FINISHED', chapter_index=chapter_index)
+                print(f'Chapter {i} read in {delta_seconds:.2f} seconds ({chars_per_sec:.0f} characters per second)')
+            else:
+                print(f'Warning: No audio generated for chapter {i}')
+                skipped_chapters.append((i, original_name, "No audio generated"))
+                if chapter_wav_path in chapter_wav_files:
+                    chapter_wav_files.remove(chapter_wav_path)
+        except Exception as e:
+            print(f'Error generating audio for chapter {i}: {e}')
+            skipped_chapters.append((i, original_name, str(e)))
+            if chapter_wav_path in chapter_wav_files:
+                chapter_wav_files.remove(chapter_wav_path)
+
+    if skipped_chapters:
+        print("\n" + "="*60)
+        print("SUMMARY OF SKIPPED CHAPTERS")
+        print("-"*60)
+        for idx, name, err in skipped_chapters:
+            print(f"Chapter {idx:3} | {name[:30]:30} | {err}")
+        print("="*60 + "\n")
 
     if has_ffmpeg:
         create_index_file(title, creator, chapter_wav_files, output_folder)
         create_m4b(chapter_wav_files, Path(file_path).name, cover_image, output_folder, m4b_assembly_method)
-        if post_event: post_event('CORE_FINISHED')
+        if post_event: post_event('CORE_FINISHED', skipped_chapters=skipped_chapters)
     else:
-        if post_event: post_event('CORE_FINISHED', error_message="ffmpeg not found, M4B not created.")
+        if post_event: post_event('CORE_FINISHED', error_message="ffmpeg not found, M4B not created.", skipped_chapters=skipped_chapters)
 
 
 def find_cover(book):
