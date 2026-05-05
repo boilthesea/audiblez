@@ -218,8 +218,16 @@ def main(file_path, voice, pick_manually, speed, output_folder='.',
 
     chapter_wav_files = []
     skipped_chapters = []
-    for i, chapter in enumerate(selected_chapters, start=1):
-        if max_chapters and i > max_chapters: break
+    carry_over_text = ""
+    
+    # Calculate the total number of chapters to process
+    chapters_to_process = selected_chapters
+    if max_chapters:
+        chapters_to_process = selected_chapters[:max_chapters]
+    
+    total_to_process = len(chapters_to_process)
+
+    for i, chapter in enumerate(chapters_to_process, start=1):
         # Access attributes safely as chapter might be a dict (from CTK UI) or an object (EpubHtml/SimpleNamespace)
         text = _get_chapter_text(chapter)
         original_name = _get_chapter_title(chapter, fallback=f"chapter_{i}")
@@ -243,6 +251,27 @@ def main(file_path, voice, pick_manually, speed, output_folder='.',
 
         # Apply filters to the chapter text
         filtered_text = apply_filters(text)
+        
+        # Prepend carried over text if any
+        if carry_over_text:
+            filtered_text = carry_over_text + "\n\n" + filtered_text
+            carry_over_text = ""
+
+        # Carry-over logic: if chapter is too small, carry it over to the next one
+        # unless it's the very last chapter.
+        is_last_chapter = (i == total_to_process)
+        if len(filtered_text.strip()) < 100 and not is_last_chapter:
+            print(f'Chapter {i} ("{original_name}") is very short ({len(filtered_text)} chars). Carrying over to next chapter.')
+            carry_over_text = filtered_text
+            chapter_wav_files.remove(chapter_wav_path)
+            if post_event:
+                post_event('CORE_CHAPTER_FINISHED', chapter_index=chapter_index)
+            continue
+            
+        # For the last chapter, if it's still too short, add a friendly buffer
+        if is_last_chapter and len(filtered_text.strip()) < 100:
+            print(f'Final chapter {i} is short. Adding concluding buffer.')
+            filtered_text += "\n\nThe End, thank you for listening."
 
         if Path(chapter_wav_path).exists():
             print(f'File for chapter {i} already exists. Skipping')
