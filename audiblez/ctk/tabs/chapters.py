@@ -60,16 +60,25 @@ class ChaptersTab(ctk.CTkFrame):
             len_label.grid(row=0, column=2, padx=10)
 
         self.controller.update_stats()
+        # Ensure scroll bindings are applied to new children
+        if hasattr(self.controller, "_bind_mouse_wheel_recursive"):
+            self.controller._bind_mouse_wheel_recursive(self.scrollable_frame, self.scrollable_frame)
 
     def select_all(self):
         for v in self.chapter_vars:
             v.set(True)
         self.controller.update_stats()
+        # Ensure scroll bindings are applied to new children
+        if hasattr(self.controller, "_bind_mouse_wheel_recursive"):
+            self.controller._bind_mouse_wheel_recursive(self.scrollable_frame, self.scrollable_frame)
 
     def select_none(self):
         for v in self.chapter_vars:
             v.set(False)
         self.controller.update_stats()
+        # Ensure scroll bindings are applied to new children
+        if hasattr(self.controller, "_bind_mouse_wheel_recursive"):
+            self.controller._bind_mouse_wheel_recursive(self.scrollable_frame, self.scrollable_frame)
 
     def on_queue(self):
         if not hasattr(self.controller, 'current_book'):

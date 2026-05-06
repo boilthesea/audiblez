@@ -37,24 +37,11 @@ class AudiblezApp(ctk.CTk):
 
         # Create main layout
         self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(1, weight=1)
-
-        # Top Bar (Global actions)
-        self.top_bar = ctk.CTkFrame(self, height=50, corner_radius=0)
-        self.top_bar.grid(row=0, column=0, sticky="ew")
-
-        self.open_btn = ctk.CTkButton(self.top_bar, text="📁 Open EPUB", command=self.on_open_epub)
-        self.open_btn.pack(side="left", padx=5, pady=10)
-
-        self.calibre_btn = ctk.CTkButton(self.top_bar, text="📖 Open with Calibre", command=self.on_open_with_calibre)
-        self.calibre_btn.pack(side="left", padx=5, pady=10)
-
-        self.about_btn = ctk.CTkButton(self.top_bar, text="ℹ️ About", width=80, command=self.on_about)
-        self.about_btn.pack(side="right", padx=10, pady=10)
+        self.grid_rowconfigure(0, weight=1)
 
         # Main 3-Column Container
         self.main_container = ctk.CTkFrame(self, corner_radius=0)
-        self.main_container.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
+        self.main_container.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
         
         # Column 0: Metadata/Params (Left)
         # Column 1: Tabs (Middle)
@@ -64,22 +51,33 @@ class AudiblezApp(ctk.CTk):
         self.main_container.grid_columnconfigure(2, weight=1) 
         self.main_container.grid_rowconfigure(0, weight=1)
 
-        # Column 0: Left Side Panels
-        self.left_container = ctk.CTkFrame(self.main_container, fg_color="transparent")
+        # Column 0: Left Side Panels (Scrollable)
+        self.left_container = ctk.CTkScrollableFrame(self.main_container, label_text="Book & Audio Settings")
         self.left_container.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
-        self.left_container.grid_rowconfigure(0, weight=0) # Details
-        self.left_container.grid_rowconfigure(1, weight=0) # Params
-        self.left_container.grid_rowconfigure(2, weight=0) # Synthesis
-        self.left_container.grid_rowconfigure(3, weight=1) # Spacer
+        self.left_container.grid_columnconfigure(0, weight=1)
+
+        # Sidebar Global Actions
+        self.sidebar_actions = ctk.CTkFrame(self.left_container, fg_color="transparent")
+        self.sidebar_actions.grid(row=0, column=0, sticky="ew", pady=(5, 15))
+        
+        self.open_btn = ctk.CTkButton(self.sidebar_actions, text="📁 Open EPUB", command=self.on_open_epub)
+        self.open_btn.pack(side="left", padx=5, expand=True, fill="x")
+
+        self.calibre_btn = ctk.CTkButton(self.sidebar_actions, text="📖 Calibre", width=100, command=self.on_open_with_calibre)
+        self.calibre_btn.pack(side="left", padx=5)
+
+        self.about_btn = ctk.CTkButton(self.sidebar_actions, text="ℹ️", width=40, command=self.on_about)
+        self.about_btn.pack(side="left", padx=5)
+
+        # Reordered Panels
+        self.synthesis = SynthesisPanel(self.left_container, self)
+        self.synthesis.grid(row=1, column=0, sticky="new", pady=(0, 15))
 
         self.book_details = BookDetailsPanel(self.left_container, self)
-        self.book_details.grid(row=0, column=0, sticky="nsew", pady=(0, 5))
+        self.book_details.grid(row=2, column=0, sticky="nsew", pady=(0, 15))
 
         self.params = ParamsPanel(self.left_container, self)
-        self.params.grid(row=1, column=0, sticky="nsew", pady=5)
-
-        self.synthesis = SynthesisPanel(self.left_container, self)
-        self.synthesis.grid(row=2, column=0, sticky="new", pady=(5, 0))
+        self.params.grid(row=3, column=0, sticky="nsew", pady=0)
 
         # Column 1: Middle Side (Notebook/Tabs)
         self.tab_container = ctk.CTkFrame(self.main_container, fg_color="transparent")
@@ -103,8 +101,50 @@ class AudiblezApp(ctk.CTk):
         self.preview = PreviewPanel(self.main_container, self)
         self.preview.grid(row=0, column=2, sticky="nsew", padx=(10, 0))
 
+        # Apply mouse wheel bindings to all scrollable areas
+        self.after(200, self._apply_global_scroll_bindings)
+
         # Start background tasks
         self.after(5000, self.check_schedule)
+
+    def _apply_global_scroll_bindings(self):
+        """Apply recursive scroll bindings to all scrollable frames to fix child widget swallowing."""
+        self._bind_mouse_wheel_recursive(self.left_container, self.left_container)
+        if hasattr(self.chapters_tab, 'scrollable_frame'):
+            self._bind_mouse_wheel_recursive(self.chapters_tab.scrollable_frame, self.chapters_tab.scrollable_frame)
+        if hasattr(self.queue_tab, 'scroll_frame'):
+            self._bind_mouse_wheel_recursive(self.queue_tab.scroll_frame, self.queue_tab.scroll_frame)
+
+    def _bind_mouse_wheel_recursive(self, widget, scrollable_frame):
+        import platform
+        is_linux = platform.system() == "Linux"
+
+        def on_mouse_wheel(event):
+            # Redirect scroll to the scrollable frame's canvas
+            try:
+                if is_linux:
+                    if event.num == 4:
+                        scrollable_frame._canvas.yview_scroll(-1, "units")
+                    elif event.num == 5:
+                        scrollable_frame._canvas.yview_scroll(1, "units")
+                else:
+                    scrollable_frame._canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            except Exception:
+                pass # Widget might be destroyed
+
+        # Bind to the widget itself
+        if is_linux:
+            widget.bind("<Button-4>", on_mouse_wheel, add="+")
+            widget.bind("<Button-5>", on_mouse_wheel, add="+")
+        else:
+            widget.bind("<MouseWheel>", on_mouse_wheel, add="+")
+
+        # Recursively bind to all existing children
+        for child in widget.winfo_children():
+            # Skip if the child is a scrollbar itself to avoid loops
+            if "scrollbar" in str(child).lower():
+                continue
+            self._bind_mouse_wheel_recursive(child, scrollable_frame)
 
     def on_open_epub(self):
         file_path = ctk.filedialog.askopenfilename(filetypes=[("EPUB Files", "*.epub")])

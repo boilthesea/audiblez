@@ -45,6 +45,10 @@ class QueueTab(ctk.CTkFrame):
             remove_btn = ctk.CTkButton(item_frame, text="❌", width=30, command=lambda i=item: self.remove_item(i))
             remove_btn.pack(side="right", padx=10)
 
+        # Ensure scroll bindings are applied to new children
+        if hasattr(self.controller, "_bind_mouse_wheel_recursive"):
+            self.controller._bind_mouse_wheel_recursive(self.scroll_frame, self.scroll_frame)
+
     def on_run_queue(self):
         # Implementation for running the queue
         self.controller.start_queue_processing()
