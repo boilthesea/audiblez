@@ -151,6 +151,7 @@ class AudiblezApp(ctk.CTk):
         if file_path:
             self.selected_file_path = file_path
             self.failed_methods = set()
+            self.experimental_mode_active = False # Pure Python track
             # Restore Stable Track (Pure Python)
             threading.Thread(target=self._load_book_file_threaded, args=(file_path,), kwargs={'method': 'pure'}, daemon=True).start()
 
