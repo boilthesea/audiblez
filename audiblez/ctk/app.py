@@ -21,6 +21,7 @@ class AudiblezApp(ctk.CTk):
         self.selected_file_path = None
         self.current_parsing_method = 1 # 1: Standard, 2: Zip, 3: Calibre
         self.failed_methods = set()
+        self.experimental_mode_active = False
         
         # Queue state
         self.queue_running = False
@@ -133,11 +134,15 @@ class AudiblezApp(ctk.CTk):
                 pass # Widget might be destroyed
 
         # Bind to the widget itself
-        if is_linux:
-            widget.bind("<Button-4>", on_mouse_wheel, add="+")
-            widget.bind("<Button-5>", on_mouse_wheel, add="+")
-        else:
-            widget.bind("<MouseWheel>", on_mouse_wheel, add="+")
+        try:
+            if is_linux:
+                widget.bind("<Button-4>", on_mouse_wheel, add="+")
+                widget.bind("<Button-5>", on_mouse_wheel, add="+")
+            else:
+                widget.bind("<MouseWheel>", on_mouse_wheel, add="+")
+        except Exception:
+            # Some CTK widgets (like CTKSegmentedButton) do not support .bind()
+            pass
 
         # Recursively bind to all existing children
         for child in widget.winfo_children():
@@ -223,6 +228,7 @@ class AudiblezApp(ctk.CTk):
         if file_path:
             self.selected_file_path = file_path
             self.failed_methods = set()
+            self.experimental_mode_active = True # Experimental track
             # Use Experimental Track with Fallback Chain (method=None)
             threading.Thread(target=self._load_book_file_threaded, args=(file_path,), kwargs={'method': None}, daemon=True).start()
 
