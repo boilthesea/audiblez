@@ -93,7 +93,8 @@ def main(file_path, voice, pick_manually, speed, output_folder='.',
          calibre_metadata: dict | None = None, calibre_cover_image_path: str | None = None,
          m4b_assembly_method: str = 'original', engine_device=None, custom_rate=None,
          tts_model='kokoro', reference_wav=None, num_steps=4, max_chunk_len=900,
-         guidance_scale=3.0, t_shift=0.5, rms=0.1, duration=5.0, return_smooth=False, seed=None):
+         guidance_scale=3.0, t_shift=0.5, rms=0.1, duration=5.0, return_smooth=False, seed=None,
+         pause_event=None, stop_event=None):
 
 
     if post_event: post_event('CORE_STARTED')
@@ -228,6 +229,10 @@ def main(file_path, voice, pick_manually, speed, output_folder='.',
     total_to_process = len(chapters_to_process)
 
     for i, chapter in enumerate(chapters_to_process, start=1):
+        if stop_event and stop_event.is_set():
+            print("Synthesis stopped by user (between chapters).")
+            break
+
         # Access attributes safely as chapter might be a dict (from CTK UI) or an object (EpubHtml/SimpleNamespace)
         text = _get_chapter_text(chapter)
         original_name = _get_chapter_title(chapter, fallback=f"chapter_{i}")
@@ -290,7 +295,12 @@ def main(file_path, voice, pick_manually, speed, output_folder='.',
         
         # Synthesis using the engine interface
         try:
-            audio_data, current_sample_rate = active_engine.generate(filtered_text, **engine_kwargs)
+            audio_data, current_sample_rate = active_engine.generate(
+                filtered_text, 
+                pause_event=pause_event, 
+                stop_event=stop_event, 
+                **engine_kwargs
+            )
             
             if audio_data.size > 0:
                 soundfile.write(chapter_wav_path, audio_data, current_sample_rate)

@@ -27,6 +27,10 @@ class AudiblezApp(ctk.CTk):
         self.queue_running = False
         self.current_queue_item = None
         
+        # Control events
+        self.pause_event = threading.Event()
+        self.stop_event = threading.Event()
+        
         # Window configuration
         self.title(APP_NAME)
         self.geometry(self.user_settings.get('window_geometry', f"{DEFAULT_WIDTH}x{DEFAULT_HEIGHT}"))
@@ -272,6 +276,10 @@ class AudiblezApp(ctk.CTk):
 
         from audiblez.ctk.core_thread import CoreThread
         
+        # Reset events
+        self.pause_event.clear()
+        self.stop_event.clear()
+        
         # Prepare parameters
         voice_data = self.params.voice_var.get().split(' ')
         # Handle potential flag in first index
@@ -306,8 +314,21 @@ class AudiblezApp(ctk.CTk):
             'seed': effective_seed
         }
 
-        self.synth_thread = CoreThread(params, self.handle_core_event)
+        self.synth_thread = CoreThread(params, self.handle_core_event, pause_event=self.pause_event, stop_event=self.stop_event)
         self.synth_thread.start()
+
+    def on_pause_synthesis(self):
+        self.pause_event.set()
+        print("Pausing synthesis...")
+
+    def on_resume_synthesis(self):
+        self.pause_event.clear()
+        print("Resuming synthesis...")
+
+    def on_stop_synthesis(self):
+        self.stop_event.set()
+        self.pause_event.clear() # Unblock if paused
+        print("Stopping synthesis...")
 
     def start_queue_processing(self):
         if self.queue_running:
@@ -373,7 +394,7 @@ class AudiblezApp(ctk.CTk):
         }
 
 
-        self.synth_thread = CoreThread(params, self.handle_core_event)
+        self.synth_thread = CoreThread(params, self.handle_core_event, pause_event=self.pause_event, stop_event=self.stop_event)
         self.synth_thread.start()
 
     def check_schedule(self):

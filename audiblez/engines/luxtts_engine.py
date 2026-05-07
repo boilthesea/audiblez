@@ -35,7 +35,7 @@ class LuxTTSEngine(BaseEngine):
             
         return self._encoded_prompt
 
-    def generate(self, text: str, **kwargs) -> tuple[np.ndarray, int]:
+    def generate(self, text: str, pause_event=None, stop_event=None, **kwargs) -> tuple[np.ndarray, int]:
         """
         Generates audio using LuxTTS with voice cloning.
         Expected kwargs: reference_wav, num_steps, guidance_scale, t_shift, speed, rms, duration, return_smooth, seed
@@ -90,6 +90,18 @@ class LuxTTSEngine(BaseEngine):
             
         all_audio = []
         for chunk in chunks:
+            if stop_event and stop_event.is_set():
+                print("Synthesis stopped by user.")
+                return np.array([]), 48000
+            
+            if pause_event and pause_event.is_set():
+                print("Synthesis paused. Waiting...")
+                while pause_event.is_set():
+                    if stop_event and stop_event.is_set():
+                        return np.array([]), 48000
+                    pause_event.wait(0.1)
+                print("Synthesis resumed.")
+
             if len(chunk) < 100:
                 chunk = chunk.ljust(100)
                 
